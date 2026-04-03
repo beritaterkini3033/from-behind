@@ -2257,8 +2257,10 @@ function list_dir($path) {
         }
         
         $checkbox = "<input type='checkbox' class='file-select' value='" . htmlspecialchars($f, ENT_QUOTES) . "'>";
+        $editClass = $isWritable ? 'action-link' : 'action-link no-edit';
+        $editOnclick = $isWritable ? "onclick='openEditModal(\"" . htmlspecialchars($f, ENT_QUOTES) . "\")'" : '';
         $actions = "<a class='action-link' href='javascript:void(0)' onclick='viewFileAsync(\"" . htmlspecialchars($f, ENT_QUOTES) . "\")'>[V]</a>
-                   <a class='action-link' href='javascript:void(0)' onclick='openEditModal(\"" . htmlspecialchars($f, ENT_QUOTES) . "\")'>[E]</a>
+                   <a class='$editClass' href='javascript:void(0)' $editOnclick>[E]</a>
                    <a class='action-link' href='javascript:void(0)' onclick='openRenameModal(\"" . htmlspecialchars($f, ENT_QUOTES) . "\")'>[R]</a>
                    <a class='action-link' href='javascript:void(0)' onclick='openChmodModal(\"" . htmlspecialchars($f, ENT_QUOTES) . "\")'>[Chmod]</a>
                    <a class='action-link' href='javascript:void(0)' onclick='openDeleteModal(\"" . htmlspecialchars($f, ENT_QUOTES) . "\")'>[Del]</a>
@@ -2312,6 +2314,7 @@ function list_dir($path) {
         .info-group { margin-bottom: 15px; }
         .info-group strong { color: #6cf; cursor: help; }
         .action-link { color: #fff; }
+        .action-link.no-edit { color: #f44 !important; text-decoration: line-through !important; cursor: not-allowed !important; pointer-events: none; }
         a { color: #f0f; text-decoration: none; }
         .file-link { color: #0f0; }
         .dir-link { color: #f0f; }
@@ -2447,7 +2450,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 030426 2232</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 030426 2240</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
