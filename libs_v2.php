@@ -12244,13 +12244,13 @@ async function generateReverseShellPayload() {
 
     if (!lhost) {
         errorDiv.textContent = 'Please enter attacker IP or hostname';
-        errorDiv.style.display = 'block';
+        errorDiv.classList.remove('hidden');
         return;
     }
 
     if (!lport || lport < 1 || lport > 65535) {
         errorDiv.textContent = 'Please enter valid port (1-65535)';
-        errorDiv.style.display = 'block';
+        errorDiv.classList.remove('hidden');
         return;
     }
 
@@ -12275,44 +12275,47 @@ async function generateReverseShellPayload() {
 
         if (data.error) {
             errorDiv.textContent = 'Error: ' + data.error;
-            errorDiv.style.display = 'block';
+            errorDiv.classList.remove('hidden');
             return;
         }
 
         document.getElementById('rsOriginalPayload').textContent = data.original;
-        document.getElementById('rsOutputTabs').style.display = 'block';
-        errorDiv.style.display = 'none';
+        document.getElementById('rsOutputTabs').classList.remove('hidden');
+        errorDiv.classList.add('hidden');
 
-        if (data.encoded !== data.original) {
+        if (data.encoded && data.encoded !== data.original) {
             document.getElementById('rsEncodedPayload').textContent = data.encoded;
+            document.getElementById('rsEncodedPayload').classList.remove('hidden');
             document.getElementById('rsEncodedTabBtn').style.display = 'block';
+            document.getElementById('rsCopyEncodedBtn').classList.remove('hidden');
         } else {
+            document.getElementById('rsEncodedPayload').classList.add('hidden');
             document.getElementById('rsEncodedTabBtn').style.display = 'none';
+            document.getElementById('rsCopyEncodedBtn').classList.add('hidden');
         }
 
     } catch (error) {
         errorDiv.textContent = 'Error: ' + error.message;
-        errorDiv.style.display = 'block';
+        errorDiv.classList.remove('hidden');
     }
 }
 
 function switchRSTab(tabName) {
-    document.querySelectorAll('.rs-tab-content').forEach(el => {
-        el.style.display = 'none';
-    });
+    document.getElementById('rsOriginalPayload').classList.add('hidden');
+    document.getElementById('rsEncodedPayload').classList.add('hidden');
     document.querySelectorAll('.rs-tab-btn').forEach(btn => {
-        btn.style.color = '#666';
+        btn.style.color = 'var(--text-dim)';
         btn.style.borderBottom = '2px solid transparent';
     });
 
     if (tabName === 'original') {
-        document.getElementById('rsOriginalPayload').style.display = 'block';
-        document.querySelector('[onclick*="switchRSTab(\'original\')"]').style.color = '#0f0';
-        document.querySelector('[onclick*="switchRSTab(\'original\')"]').style.borderBottom = '2px solid #0f0';
+        document.getElementById('rsOriginalPayload').classList.remove('hidden');
+        document.querySelector('[onclick*="switchRSTab(\'original\')"]').style.color = 'var(--primary)';
+        document.querySelector('[onclick*="switchRSTab(\'original\')"]').style.borderBottom = '2px solid var(--primary)';
     } else {
-        document.getElementById('rsEncodedPayload').style.display = 'block';
-        document.querySelector('[onclick*="switchRSTab(\'encoded\')"]').style.color = '#0f0';
-        document.querySelector('[onclick*="switchRSTab(\'encoded\')"]').style.borderBottom = '2px solid #0f0';
+        document.getElementById('rsEncodedPayload').classList.remove('hidden');
+        document.querySelector('[onclick*="switchRSTab(\'encoded\')"]').style.color = 'var(--primary)';
+        document.querySelector('[onclick*="switchRSTab(\'encoded\')"]').style.borderBottom = '2px solid var(--primary)';
     }
 }
 
@@ -12324,7 +12327,7 @@ async function generateReverseShellListener() {
 
     if (!lhost || !lport) {
         errorDiv.textContent = 'Please configure attacker IP and port';
-        errorDiv.style.display = 'block';
+        errorDiv.classList.remove('hidden');
         return;
     }
 
@@ -12342,18 +12345,18 @@ async function generateReverseShellListener() {
 
         if (data.error) {
             errorDiv.textContent = 'Error: ' + data.error;
-            errorDiv.style.display = 'block';
+            errorDiv.classList.remove('hidden');
             return;
         }
 
         document.getElementById('rsListenerOutput').textContent = data.command;
-        document.getElementById('rsListenerOutput').style.display = 'block';
-        document.getElementById('rsCopyListenerBtn').style.display = 'block';
-        errorDiv.style.display = 'none';
+        document.getElementById('rsListenerOutput').classList.remove('hidden');
+        document.getElementById('rsCopyListenerBtn').classList.remove('hidden');
+        errorDiv.classList.add('hidden');
 
     } catch (error) {
         errorDiv.textContent = 'Error: ' + error.message;
-        errorDiv.style.display = 'block';
+        errorDiv.classList.remove('hidden');
     }
 }
 
@@ -12364,7 +12367,7 @@ async function decodeReverseShellPayload() {
 
     if (!payload) {
         errorDiv.textContent = 'Please paste encoded payload';
-        errorDiv.style.display = 'block';
+        errorDiv.classList.remove('hidden');
         return;
     }
 
@@ -12382,18 +12385,18 @@ async function decodeReverseShellPayload() {
 
         if (data.error) {
             errorDiv.textContent = 'Error: ' + data.error;
-            errorDiv.style.display = 'block';
+            errorDiv.classList.remove('hidden');
             return;
         }
 
         document.getElementById('rsDecodeOutput').textContent = data.decoded || 'Failed to decode';
-        document.getElementById('rsDecodeOutput').style.display = 'block';
-        document.getElementById('rsCopyDecodeBtn').style.display = 'block';
-        errorDiv.style.display = 'none';
+        document.getElementById('rsDecodeOutput').classList.remove('hidden');
+        document.getElementById('rsCopyDecodeBtn').classList.remove('hidden');
+        errorDiv.classList.add('hidden');
 
     } catch (error) {
         errorDiv.textContent = 'Error: ' + error.message;
-        errorDiv.style.display = 'block';
+        errorDiv.classList.remove('hidden');
     }
 }
 
